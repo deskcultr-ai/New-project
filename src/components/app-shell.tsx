@@ -44,6 +44,7 @@ function navForRole(role: Profile["role"] | undefined): NavItem[] {
       { label: "Messages", href: "/messages", icon: icon(ICONS.chat) },
       { label: "Drive", href: "/drive", icon: icon(ICONS.folder) },
       { label: "Settings", href: "/admin/settings", icon: icon(ICONS.gear) },
+      { label: "Profile", href: "/profile", icon: icon("M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z") },
     ];
   }
   if (role === "admin") {
@@ -53,12 +54,14 @@ function navForRole(role: Profile["role"] | undefined): NavItem[] {
       { label: "Tasks", href: "/admin/tasks", icon: icon(ICONS.check) },
       { label: "Messages", href: "/messages", icon: icon(ICONS.chat) },
       { label: "Drive", href: "/drive", icon: icon(ICONS.folder) },
+      { label: "Profile", href: "/profile", icon: icon("M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z") },
     ];
   }
   return [
     { label: "My Tasks", href: "/dashboard", icon: icon(ICONS.check) },
     { label: "Messages", href: "/messages", icon: icon(ICONS.chat) },
     { label: "Drive", href: "/drive", icon: icon(ICONS.folder) },
+    { label: "Profile", href: "/profile", icon: icon("M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z") },
   ];
 }
 
@@ -136,12 +139,15 @@ function NotificationBell({ profileId }: { profileId: string }) {
     let cancelled = false;
 
     async function load() {
+      // Fetch notifications from the last 2 hours
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from("notifications")
         .select("id, title, body, link, read_at, created_at")
         .eq("profile_id", profileId)
+        .gte("created_at", twoHoursAgo)
         .order("created_at", { ascending: false })
-        .limit(8);
+        .limit(30);
       if (!cancelled) setItems((data as NotificationItem[]) ?? []);
     }
     load();
@@ -152,7 +158,7 @@ function NotificationBell({ profileId }: { profileId: string }) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `profile_id=eq.${profileId}` },
         (payload) => {
-          setItems((current) => [payload.new as NotificationItem, ...current].slice(0, 8));
+          setItems((current) => [payload.new as NotificationItem, ...current].slice(0, 30));
         }
       )
       .subscribe();
@@ -287,13 +293,19 @@ export function AppShell({
           <NavLinks items={items} pathname={pathname} sidebarCollapsed={sidebarCollapsed} />
         </nav>
         <div className="profile-footer w-full">
-          <div className="profile-avatar">
-            {initials}
+          <Link href="/profile" className="profile-avatar decoration-none" title="Profile Settings">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt="Avatar" className="h-full w-full rounded-full object-cover" />
+            ) : (
+              initials
+            )}
             <span className="online-indicator"></span>
-          </div>
+          </Link>
           {!sidebarCollapsed && (
             <div className="min-w-0 flex-1">
-              <p className="profile-name-text truncate text-[var(--text-primary)] m-0 leading-tight">{profile?.full_name || displayName(profile)}</p>
+              <p className="profile-name-text truncate text-[var(--text-primary)] m-0 leading-tight">
+                {profile?.username ? `@${profile.username}` : (profile?.full_name || displayName(profile))}
+              </p>
               <p className="profile-email-text truncate text-[var(--text-tertiary)] m-0 mt-0.5 leading-none">{profile?.email}</p>
             </div>
           )}

@@ -9,7 +9,17 @@ import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
 
 type Department = { id: string; name: string };
-type DirectoryPerson = { id: string; full_name: string | null; email: string; role: string };
+type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string };
+type ForwardRequest = {
+  id: string;
+  task_id: string;
+  reason: string;
+  status: string;
+  created_at: string;
+  requested_by: { id: string; full_name: string | null; username: string | null; email: string } | null;
+  forward_to: { id: string; full_name: string | null; username: string | null; email: string } | null;
+  task: { id: string; title: string; department_id: string } | null;
+};
 
 export default function AdminTasksPage() {
   const router = useRouter();
@@ -33,6 +43,11 @@ export default function AdminTasksPage() {
   const [assigneeId, setAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const [forwardRequests, setForwardRequests] = useState<ForwardRequest[]>([]);
+  const [forwardBusyId, setForwardBusyId] = useState<string | null>(null);
+  const [rejectNote, setRejectNote] = useState<Record<string, string>>({});
+  const [forwardNotice, setForwardNotice] = useState("");
 
   const load = useCallback(async () => {
     const me = await getProfile();
@@ -58,6 +73,15 @@ export default function AdminTasksPage() {
     const eligibleRoles = me.role === "super_admin" ? ["admin", "employee"] : ["employee"];
     setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => eligibleRoles.includes(p.role)));
     setTasks((taskRows ?? []) as Task[]);
+
+    // Load pending forward requests
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) {
+      const res = await fetch("/api/task-forward", { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json();
+      if (res.ok) setForwardRequests(json.requests ?? []);
+    }
     setLoading(false);
   }, [router]);
 
@@ -98,6 +122,28 @@ export default function AdminTasksPage() {
     setAssigneeId("");
     load();
   }
+
+  async function reviewForward(requestId: string, action: "approve" | "reject") {
+    setForwardBusyId(requestId);
+    setForwardNotice("");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    const res = await fetch("/api/task-forward", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ requestId, action, rejectionNote: rejectNote[requestId] }),
+    });
+    const json = await res.json();
+    setForwardBusyId(null);
+    if (!res.ok) { setError(json.error ?? "Failed to review request."); return; }
+    setForwardNotice(action === "approve" ? "✅ Task reassigned successfully!" : "❌ Request rejected.");
+    setForwardRequests((prev) => prev.filter((r) => r.id !== requestId));
+    load();
+  }
+
+  const personDisplayName = (p: { full_name: string | null; username: string | null; email: string } | null) =>
+    p ? (p.username ? `@${p.username}` : p.full_name || p.email) : "Unknown";
 
   if (!profile) {
     return (
@@ -176,6 +222,73 @@ export default function AdminTasksPage() {
             </Button>
           </form>
         </Card>
+
+        {/* Forward Requests Panel */}
+        {forwardRequests.length > 0 && (
+          <Card>
+            <div className="flex items-center gap-3 mb-4">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500/15 text-orange-400">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                </svg>
+              </span>
+              <div>
+                <h2 className="text-base font-bold text-[var(--text-primary)] m-0">Reassignment Requests</h2>
+                <p className="text-xs text-[var(--text-tertiary)] m-0">{forwardRequests.length} pending</p>
+              </div>
+            </div>
+            {forwardNotice && <Alert tone="success" className="mb-4">{forwardNotice}</Alert>}
+            <div className="space-y-4">
+              {forwardRequests.map((req) => (
+                <div key={req.id} className="rounded-xl border border-[var(--divider)] bg-[var(--surface-faint)] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-[var(--text-primary)] m-0">{req.task?.title ?? "(deleted task)"}</p>
+                      <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">
+                        <span className="font-semibold text-purple-400">{personDisplayName(req.requested_by)}</span>
+                        {" → "}
+                        <span className="font-semibold text-emerald-400">{personDisplayName(req.forward_to)}</span>
+                      </p>
+                      <p className="mt-2 text-xs text-[var(--text-secondary)] italic">"{req.reason}"</p>
+                      {req.status === "pending" && (
+                        <div className="mt-3 space-y-2">
+                          <Input
+                            value={rejectNote[req.id] ?? ""}
+                            onChange={(e) => setRejectNote((prev) => ({ ...prev, [req.id]: e.target.value }))}
+                            placeholder="Rejection note (optional)"
+                            className="h-9 text-xs"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              disabled={forwardBusyId === req.id}
+                              onClick={() => reviewForward(req.id, "approve")}
+                              className="h-8 text-xs px-3"
+                            >
+                              {forwardBusyId === req.id ? "..." : "✅ Approve"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              disabled={forwardBusyId === req.id}
+                              onClick={() => reviewForward(req.id, "reject")}
+                              className="h-8 text-xs px-3 text-red-400 hover:bg-red-500/10"
+                            >
+                              ❌ Reject
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs text-[var(--text-tertiary)] shrink-0">
+                      {new Date(req.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <div className="grid gap-4 lg:grid-cols-4">
           {STATUS_ORDER.map((status) => (

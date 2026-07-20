@@ -80,6 +80,15 @@ export default function TaskDetailPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
+  // Task forward (employee only)
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardQuery, setForwardQuery] = useState("");
+  const [forwardTo, setForwardTo] = useState<DirectoryPerson | null>(null);
+  const [forwardReason, setForwardReason] = useState("");
+  const [forwardBusy, setForwardBusy] = useState(false);
+  const [forwardError, setForwardError] = useState("");
+  const [forwardSuccess, setForwardSuccess] = useState("");
+
   const load = useCallback(async () => {
     const me = await getProfile();
     if (!me) {
@@ -125,9 +134,13 @@ export default function TaskDetailPage() {
     setAttachments((attachmentRows ?? []) as unknown as Attachment[]);
 
     if (me.role !== "employee") {
-      const { data: people } = await supabase.from("profiles").select("id, full_name, email, role").order("full_name");
+      const { data: people } = await supabase.from("profiles").select("id, full_name, username, email, role").order("full_name");
       const eligibleRoles = me.role === "super_admin" ? ["admin", "employee"] : ["employee"];
       setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => eligibleRoles.includes(p.role)));
+    } else {
+      // Employees need the dept directory to search for forward-to person
+      const { data: people } = await supabase.from("profiles").select("id, full_name, username, email, role").eq("department_id", me.department_id ?? "").order("full_name");
+      setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => p.role === "employee" && p.id !== me.id));
     }
 
     setLoading(false);
@@ -225,6 +238,30 @@ export default function TaskDetailPage() {
     preview.open({ url: data.signedUrl, name: attachment.file_name, contentType: attachment.content_type });
   }
 
+  async function submitForwardRequest(e: React.FormEvent) {
+    e.preventDefault();
+    if (!profile || !task || !forwardTo || !forwardReason.trim()) return;
+    setForwardBusy(true);
+    setForwardError("");
+    setForwardSuccess("");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    const res = await fetch("/api/task-forward", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ taskId: task.id, forwardTo: forwardTo.id, reason: forwardReason.trim() }),
+    });
+    const json = await res.json();
+    setForwardBusy(false);
+    if (!res.ok) { setForwardError(json.error ?? "Could not submit request."); return; }
+    setForwardSuccess("✅ Reassignment request sent to your admin!");
+    setForwardOpen(false);
+    setForwardTo(null);
+    setForwardReason("");
+    setForwardQuery("");
+  }
+
   if (!profile) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
@@ -320,6 +357,70 @@ export default function TaskDetailPage() {
               </div>
             </form>
           </Card>
+
+          {/* Request Reassignment — employees only, only when assigned to this task */}
+          {profile.role === "employee" && task.assigned_to === profile.id && (
+            <Card>
+              <h2 className="text-base font-bold text-[var(--text-primary)]">Request Reassignment</h2>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">You cannot reassign this task directly. Submit a request with a reason — your admin will review it.</p>
+              {forwardSuccess && <Alert tone="success" className="mt-3">{forwardSuccess}</Alert>}
+              {!forwardOpen ? (
+                <Button type="button" variant="ghost" className="mt-3" onClick={() => setForwardOpen(true)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 mr-2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                  </svg>
+                  Request Reassignment
+                </Button>
+              ) : (
+                <form onSubmit={submitForwardRequest} className="mt-4 space-y-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-1.5">Forward to (search by name or @username)</label>
+                    <input
+                      type="text"
+                      value={forwardTo ? (forwardTo.full_name || forwardTo.email) : forwardQuery}
+                      onChange={(e) => { setForwardQuery(e.target.value); setForwardTo(null); }}
+                      placeholder="Search teammate..."
+                      className="h-11 w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] px-3.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] placeholder:text-[var(--text-tertiary)]"
+                    />
+                    {!forwardTo && forwardQuery.trim().length >= 2 && (
+                      <div className="mt-1 max-h-36 overflow-y-auto rounded-xl border border-[var(--divider)] bg-[var(--glass-bg)]">
+                        {assignees.filter((p) =>
+                          p.id !== profile.id &&
+                          ((p.full_name?.toLowerCase().includes(forwardQuery.toLowerCase())) ||
+                          p.email.toLowerCase().includes(forwardQuery.toLowerCase()))
+                        ).map((p) => (
+                          <button key={p.id} type="button" onClick={() => { setForwardTo(p); setForwardQuery(p.full_name || p.email); }}
+                            className="flex w-full items-center border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] cursor-pointer">
+                            {p.full_name || p.email}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-1.5">Reason for reassignment *</label>
+                    <textarea
+                      required
+                      value={forwardReason}
+                      onChange={(e) => setForwardReason(e.target.value)}
+                      placeholder="Explain why you want to forward this task..."
+                      rows={3}
+                      className="w-full resize-none rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] px-3.5 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[#8b5cf6] transition"
+                    />
+                  </div>
+                  {forwardError && <Alert tone="danger">{forwardError}</Alert>}
+                  <div className="flex gap-2">
+                    <Button type="submit" disabled={forwardBusy || !forwardTo || !forwardReason.trim()}>
+                      {forwardBusy ? "Submitting..." : "Submit Request"}
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => { setForwardOpen(false); setForwardError(""); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </Card>
+          )}
 
           <Card>
             <h2 className="text-base font-bold text-[var(--text-primary)]">Comments</h2>
