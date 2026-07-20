@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getProfile, displayName, type Profile } from "@/lib/session";
-import { Card, Button } from "@/components/ui";
+import { AppShell } from "@/components/app-shell";
+import { Card, Badge } from "@/components/ui";
+import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, type Task } from "@/lib/tasks";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -23,15 +26,18 @@ export default function DashboardPage() {
         return;
       }
       setProfile(me);
+
+      const { data } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("assigned_to", me.id)
+        .order("due_date", { ascending: true, nullsFirst: false })
+        .order("priority", { ascending: false });
+      setTasks((data ?? []) as Task[]);
       setLoading(false);
     }
     load();
   }, [router]);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    router.replace("/login");
-  }
 
   if (loading || !profile) {
     return (
@@ -42,19 +48,28 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-10">
-      <div className="mx-auto max-w-2xl">
-        <Card>
-          <h1 className="text-xl font-black tracking-tight text-slate-900">Welcome, {displayName(profile)}.</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Your account is active. Tasks, meetings, chat, attendance, and the rest of your workspace land here in
-            the next build steps.
-          </p>
-          <Button variant="secondary" className="mt-6" onClick={signOut}>
-            Sign out
-          </Button>
-        </Card>
+    <AppShell profile={profile} title="My Tasks" subtitle={`Welcome, ${displayName(profile)}.`}>
+      <div className="space-y-3">
+        {tasks.length === 0 && (
+          <Card className="text-center text-sm text-slate-500">Nothing assigned to you yet.</Card>
+        )}
+        {tasks.map((task) => (
+          <Card key={task.id} hover className="cursor-pointer" onClick={() => router.push(`/tasks/${task.id}`)}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-slate-900">{task.title}</p>
+                {task.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{task.description}</p>}
+              </div>
+              {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
+              <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+              {task.due_date && <span className="text-xs text-slate-400">Due {new Date(task.due_date).toLocaleDateString()}</span>}
+            </div>
+          </Card>
+        ))}
       </div>
-    </main>
+    </AppShell>
   );
 }
