@@ -77,28 +77,7 @@ create or replace trigger tr_log_task_events
   after insert or update on public.tasks
   for each row execute function public.log_task_events();
 
--- 3. Log user invitation creation
-create or replace function public.log_invite_events()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  insert into public.activity_logs (organization_id, actor_id, action, details)
-  values (
-    new.organization_id,
-    new.invited_by,
-    'member.invited',
-    jsonb_build_object('email', new.email, 'role', new.role)
-  );
-  return new;
-end;
-$$;
 
-create or replace trigger tr_log_invite_events
-  after insert on public.invites
-  for each row execute function public.log_invite_events();
 
 -- 4. Log member joining (profile created)
 create or replace function public.log_member_joined()
