@@ -58,7 +58,14 @@ export default function LoginPage() {
         setError(authErrorMessage(signInError, "Unable to sign in. Check your email and password."));
         return;
       }
-      router.replace(await getPostAuthRedirectSafe());
+      const destination = await getPostAuthRedirectSafe();
+      if (destination === "/login") {
+        await supabase.auth.signOut();
+        setBusy(false);
+        setError("Your account is not active, or you don't have access.");
+        return;
+      }
+      router.replace(destination);
     } catch (timeoutError) {
       setBusy(false);
       setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));
@@ -101,7 +108,14 @@ export default function LoginPage() {
         setError(authErrorMessage(verifyError, "That code didn't work. Request a new one and use only the latest email."));
         return;
       }
-      router.replace(await getPostAuthRedirectSafe());
+      const destination = await getPostAuthRedirectSafe();
+      if (destination === "/login") {
+        await supabase.auth.signOut();
+        setBusy(false);
+        setError("Your account is not active, or you don't have access.");
+        return;
+      }
+      router.replace(destination);
     } catch (timeoutError) {
       setBusy(false);
       setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));
