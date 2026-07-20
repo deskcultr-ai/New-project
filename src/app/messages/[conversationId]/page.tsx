@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { Button, Badge, Avatar } from "@/components/ui";
+import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { parseMessageBody, taskToken, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
 
 type PersonRef = { id: string; full_name: string | null; email: string } | null;
@@ -16,7 +17,7 @@ type MessageRow = {
   created_at: string;
   author: PersonRef;
 };
-type Attachment = { id: string; message_id: string; storage_path: string; file_name: string; file_size: number };
+type Attachment = { id: string; message_id: string; storage_path: string; file_name: string; file_size: number; content_type: string | null };
 type Reaction = { id: string; message_id: string; profile_id: string; emoji: string };
 type TaskPreview = { id: string; title: string; status: string };
 type DirectoryPerson = { id: string; full_name: string | null; email: string };
@@ -93,7 +94,7 @@ export default function ConversationPage() {
     const messageIds = rows.map((r) => r.id);
     if (messageIds.length > 0) {
       const [{ data: attachmentRows }, { data: reactionRows }] = await Promise.all([
-        supabase.from("message_attachments").select("id, message_id, storage_path, file_name, file_size").in("message_id", messageIds),
+        supabase.from("message_attachments").select("id, message_id, storage_path, file_name, file_size, content_type").in("message_id", messageIds),
         supabase.from("message_reactions").select("id, message_id, profile_id, emoji").in("message_id", messageIds),
       ]);
       setAttachments((attachmentRows ?? []) as Attachment[]);
@@ -240,9 +241,11 @@ export default function ConversationPage() {
     }
   }
 
+  const preview = useFilePreview();
+
   async function downloadFile(attachment: Attachment) {
     const { data } = await supabase.storage.from("org-drive").createSignedUrl(attachment.storage_path, 60);
-    if (data) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    if (data) preview.open({ url: data.signedUrl, name: attachment.file_name, contentType: attachment.content_type });
   }
 
   if (loading) {
@@ -363,6 +366,7 @@ export default function ConversationPage() {
           </form>
         )}
       </div>
+      <FilePreviewModal target={preview.target} onClose={preview.close} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Select, Badge, Alert } from "@/components/ui";
+import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
 
 type PersonRef = { id: string; full_name: string | null; email: string } | null;
@@ -26,8 +27,26 @@ type TaskDetail = {
   creator: PersonRef;
 };
 type Comment = { id: string; body: string; created_at: string; author: PersonRef };
-type Attachment = { id: string; storage_path: string; file_name: string; file_size: number; created_at: string; uploader: PersonRef };
+type Attachment = {
+  id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  content_type: string | null;
+  created_at: string;
+  uploader: PersonRef;
+};
 type DirectoryPerson = { id: string; full_name: string | null; email: string; role: string };
+
+function groupAttachmentVersions(attachments: Attachment[]) {
+  const byName = new Map<string, Attachment[]>();
+  for (const a of attachments) {
+    const list = byName.get(a.file_name) ?? [];
+    list.push(a);
+    byName.set(a.file_name, list);
+  }
+  return Array.from(byName.values()).map((versions) => versions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+}
 
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
@@ -39,6 +58,7 @@ export default function TaskDetailPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [assignees, setAssignees] = useState<DirectoryPerson[]>([]);
+  const preview = useFilePreview();
 
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [isBlocked, setIsBlocked] = useState(false);
@@ -77,7 +97,7 @@ export default function TaskDetailPage() {
         .order("created_at", { ascending: true }),
       supabase
         .from("task_attachments")
-        .select("id, storage_path, file_name, file_size, created_at, uploader:profiles(id,full_name,email)")
+        .select("id, storage_path, file_name, file_size, content_type, created_at, uploader:profiles(id,full_name,email)")
         .eq("task_id", params.id)
         .order("created_at", { ascending: true }),
     ]);
@@ -189,13 +209,13 @@ export default function TaskDetailPage() {
     load();
   }
 
-  async function downloadFile(attachment: Attachment) {
+  async function openFile(attachment: Attachment) {
     const { data, error } = await supabase.storage.from("org-drive").createSignedUrl(attachment.storage_path, 60);
     if (error || !data) {
       setUploadError(error?.message ?? "Could not create a download link.");
       return;
     }
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    preview.open({ url: data.signedUrl, name: attachment.file_name, contentType: attachment.content_type });
   }
 
   if (loading || !profile) {
@@ -326,21 +346,13 @@ export default function TaskDetailPage() {
         <div>
           <Card>
             <h2 className="text-base font-bold text-slate-900">Attachments</h2>
+            <p className="mt-1 text-xs text-slate-500">Re-uploading a file with the same name keeps earlier versions.</p>
             <div className="mt-4 space-y-3">
               {attachments.length === 0 && <p className="text-sm text-slate-400">No files yet.</p>}
-              {attachments.map((attachment) => (
-                <button
-                  key={attachment.id}
-                  type="button"
-                  onClick={() => downloadFile(attachment)}
-                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2.5 text-left text-sm hover:border-primary/40 hover:bg-primary-light"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold text-slate-800">{attachment.file_name}</span>
-                    <span className="block text-xs text-slate-500">{(attachment.file_size / 1024).toFixed(0)} KB · {personLabel(attachment.uploader)}</span>
-                  </span>
-                </button>
-              ))}
+              {groupAttachmentVersions(attachments).map((versions) => {
+                const [latest, ...older] = versions;
+                return <AttachmentGroup key={latest.id} latest={latest} older={older} onOpen={openFile} />;
+              })}
             </div>
             <label className="mt-4 block">
               <span className="sr-only">Upload a file</span>
@@ -351,6 +363,42 @@ export default function TaskDetailPage() {
           </Card>
         </div>
       </div>
+      <FilePreviewModal target={preview.target} onClose={preview.close} />
     </AppShell>
+  );
+}
+
+function AttachmentGroup({ latest, older, onOpen }: { latest: Attachment; older: Attachment[]; onOpen: (a: Attachment) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-lg border border-slate-100">
+      <button
+        type="button"
+        onClick={() => onOpen(latest)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-primary-light"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-semibold text-slate-800">{latest.file_name}</span>
+          <span className="block text-xs text-slate-500">{(latest.file_size / 1024).toFixed(0)} KB</span>
+        </span>
+        {older.length > 0 && <Badge tone="neutral">v{older.length + 1}</Badge>}
+      </button>
+      {older.length > 0 && (
+        <div className="border-t border-slate-100 px-3 py-2">
+          <button type="button" onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-primary">
+            {expanded ? "Hide" : `${older.length} earlier version${older.length > 1 ? "s" : ""}`}
+          </button>
+          {expanded && (
+            <div className="mt-2 space-y-1">
+              {older.map((version, i) => (
+                <button key={version.id} type="button" onClick={() => onOpen(version)} className="block text-xs text-slate-600 hover:text-primary hover:underline">
+                  v{older.length - i} · {new Date(version.created_at).toLocaleString()}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

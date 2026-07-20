@@ -6,9 +6,10 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Card, Alert } from "@/components/ui";
+import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { formatBytes, PERSONAL_FOLDER_PREFIX } from "@/lib/drive";
 
-type PersonalFile = { name: string; size: number };
+type PersonalFile = { name: string; size: number; contentType: string | null };
 
 export default function PersonalDrivePage() {
   const params = useParams<{ profileId: string }>();
@@ -26,7 +27,13 @@ export default function PersonalDrivePage() {
       setFiles([]);
       return;
     }
-    setFiles(((data ?? []) as { name: string; metadata: { size: number } | null }[]).map((f) => ({ name: f.name, size: f.metadata?.size ?? 0 })));
+    setFiles(
+      ((data ?? []) as { name: string; metadata: { size: number; mimetype?: string } | null }[]).map((f) => ({
+        name: f.name,
+        size: f.metadata?.size ?? 0,
+        contentType: f.metadata?.mimetype ?? null,
+      }))
+    );
     setError("");
   }, [params.profileId]);
 
@@ -61,11 +68,13 @@ export default function PersonalDrivePage() {
     load(profile);
   }
 
-  async function downloadFile(fileName: string) {
+  const preview = useFilePreview();
+
+  async function downloadFile(file: PersonalFile) {
     if (!profile) return;
-    const path = `${PERSONAL_FOLDER_PREFIX(profile.organization_id, params.profileId)}/${fileName}`;
+    const path = `${PERSONAL_FOLDER_PREFIX(profile.organization_id, params.profileId)}/${file.name}`;
     const { data } = await supabase.storage.from("org-drive").createSignedUrl(path, 60);
-    if (data) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    if (data) preview.open({ url: data.signedUrl, name: file.name, contentType: file.contentType });
   }
 
   if (loading || !profile) {
@@ -94,7 +103,7 @@ export default function PersonalDrivePage() {
             <button
               key={file.name}
               type="button"
-              onClick={() => downloadFile(file.name)}
+              onClick={() => downloadFile(file)}
               className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-primary-light"
             >
               <span className="truncate font-semibold text-slate-800">{file.name}</span>
@@ -104,6 +113,7 @@ export default function PersonalDrivePage() {
           {files.length === 0 && <p className="text-sm text-slate-400">No files yet.</p>}
         </div>
       </Card>
+      <FilePreviewModal target={preview.target} onClose={preview.close} />
     </AppShell>
   );
 }

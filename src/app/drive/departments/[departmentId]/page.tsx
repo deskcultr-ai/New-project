@@ -6,12 +6,13 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Card, Button, Alert } from "@/components/ui";
+import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { formatBytes, RESOURCES_PREFIX } from "@/lib/drive";
 
 type Department = { id: string; name: string };
 type Task = { id: string; title: string; status: string };
-type TaskAttachment = { id: string; file_name: string; file_size: number; storage_path: string };
-type ResourceFile = { name: string; size: number };
+type TaskAttachment = { id: string; file_name: string; file_size: number; storage_path: string; content_type: string | null };
+type ResourceFile = { name: string; size: number; contentType: string | null };
 
 export default function DepartmentDrivePage() {
   const params = useParams<{ departmentId: string }>();
@@ -31,9 +32,17 @@ export default function DepartmentDrivePage() {
 
   const canWriteResources = profile?.role === "super_admin" || (profile?.role === "admin" && profile.department_id === params.departmentId);
 
+  const preview = useFilePreview();
+
   const loadResources = useCallback(async (organizationId: string) => {
     const { data } = await supabase.storage.from("org-drive").list(RESOURCES_PREFIX(organizationId, params.departmentId));
-    setResources(((data ?? []) as { name: string; metadata: { size: number } | null }[]).map((f) => ({ name: f.name, size: f.metadata?.size ?? 0 })));
+    setResources(
+      ((data ?? []) as { name: string; metadata: { size: number; mimetype?: string } | null }[]).map((f) => ({
+        name: f.name,
+        size: f.metadata?.size ?? 0,
+        contentType: f.metadata?.mimetype ?? null,
+      }))
+    );
   }, [params.departmentId]);
 
   useEffect(() => {
@@ -70,21 +79,21 @@ export default function DepartmentDrivePage() {
     }
     setExpandedTask(taskId);
     if (!taskAttachments[taskId]) {
-      const { data } = await supabase.from("task_attachments").select("id, file_name, file_size, storage_path").eq("task_id", taskId);
+      const { data } = await supabase.from("task_attachments").select("id, file_name, file_size, storage_path, content_type").eq("task_id", taskId);
       setTaskAttachments((current) => ({ ...current, [taskId]: (data ?? []) as TaskAttachment[] }));
     }
   }
 
   async function downloadTaskFile(attachment: TaskAttachment) {
     const { data } = await supabase.storage.from("org-drive").createSignedUrl(attachment.storage_path, 60);
-    if (data) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    if (data) preview.open({ url: data.signedUrl, name: attachment.file_name, contentType: attachment.content_type });
   }
 
-  async function downloadResource(fileName: string) {
+  async function downloadResource(file: ResourceFile) {
     if (!profile) return;
-    const path = `${RESOURCES_PREFIX(profile.organization_id, params.departmentId)}/${fileName}`;
+    const path = `${RESOURCES_PREFIX(profile.organization_id, params.departmentId)}/${file.name}`;
     const { data } = await supabase.storage.from("org-drive").createSignedUrl(path, 60);
-    if (data) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    if (data) preview.open({ url: data.signedUrl, name: file.name, contentType: file.contentType });
   }
 
   async function uploadResource(event: React.ChangeEvent<HTMLInputElement>) {
@@ -140,7 +149,7 @@ export default function DepartmentDrivePage() {
               <button
                 key={file.name}
                 type="button"
-                onClick={() => downloadResource(file.name)}
+                onClick={() => downloadResource(file)}
                 className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-primary-light"
               >
                 <span className="truncate font-semibold text-slate-800">{file.name}</span>
@@ -181,6 +190,7 @@ export default function DepartmentDrivePage() {
           </div>
         </Card>
       </div>
+      <FilePreviewModal target={preview.target} onClose={preview.close} />
     </AppShell>
   );
 }
