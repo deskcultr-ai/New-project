@@ -24,7 +24,13 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
   const router = useRouter();
   const pathname = usePathname();
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [items, setItems] = useState<ListItem[]>([]);
   const [online, setOnline] = useState<Set<string>>(new Set());
 
@@ -86,6 +92,7 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
         return;
       }
       setProfile(me);
+      sessionStorage.setItem("user_profile", JSON.stringify(me));
       await load(me);
       setLoading(false);
 
@@ -123,9 +130,9 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
     router.push(`/messages/${data}`);
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -138,31 +145,31 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
   return (
     <AppShell profile={profile} title="Messages">
       <div className="grid h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-100 p-3">
+        <div className="flex flex-col overflow-hidden glass-panel">
+          <div className="border-b border-[var(--divider)] p-3">
             <button
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
-              className="w-full rounded-lg bg-primary-light px-3 py-2 text-left text-sm font-bold text-primary hover:bg-primary/15"
+              className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3.5 py-2 text-left text-sm font-bold text-[var(--text-primary)] hover:bg-[var(--surface-med)] transition-all cursor-pointer"
             >
               + New message
             </button>
             {pickerOpen && (
               <div className="mt-2 space-y-2">
                 <Input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search people..." className="h-9" />
-                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-100">
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-[var(--divider)] bg-[var(--glass-bg)]">
                   {filteredDirectory.map((p) => (
                     <button
                       key={p.id}
                       type="button"
                       onClick={() => startDm(p.id)}
-                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      className="flex w-full items-center justify-between border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] cursor-pointer"
                     >
                       {p.full_name || p.email}
                       {online.has(p.id) && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
                     </button>
                   ))}
-                  {filteredDirectory.length === 0 && <p className="px-3 py-3 text-center text-xs text-slate-400">No matches.</p>}
+                  {filteredDirectory.length === 0 && <p className="px-3 py-3 text-center text-xs text-[var(--text-tertiary)]">No matches.</p>}
                 </div>
               </div>
             )}
@@ -175,8 +182,8 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
                   key={item.id}
                   href={`/messages/${item.id}`}
                   className={cn(
-                    "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition",
-                    active ? "bg-primary-light text-primary" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                    "flex items-center justify-between gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition decoration-none",
+                    active ? "active-route text-white" : "text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-2">
@@ -189,10 +196,10 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
                 </Link>
               );
             })}
-            {items.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-400">No conversations yet.</p>}
+            {items.length === 0 && <p className="px-3 py-6 text-center text-sm text-[var(--text-tertiary)]">No conversations yet.</p>}
           </nav>
         </div>
-        <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">{children}</div>
+        <div className="min-w-0 overflow-hidden glass-panel">{children}</div>
       </div>
     </AppShell>
   );

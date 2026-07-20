@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
-import { Avatar } from "@/components/ui";
 import { displayName, type Profile } from "@/lib/session";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
@@ -65,17 +64,19 @@ function navForRole(role: Profile["role"] | undefined): NavItem[] {
 
 function NavLinks({ items, pathname, onNavigate }: { items: NavItem[]; pathname: string; onNavigate?: () => void }) {
   return (
-    <ul className="space-y-1">
+    <ul className="space-y-1 p-0 list-none">
       {items.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = item.href === "/admin" || item.href === "/dashboard"
+          ? pathname === item.href
+          : pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
           <li key={item.href}>
             <Link
               href={item.href}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
-                active ? "bg-primary-light text-primary" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                "nav-link-item flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition decoration-none",
+                active ? "active-route text-white" : "text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
               )}
             >
               {item.icon}
@@ -85,6 +86,42 @@ function NavLinks({ items, pathname, onNavigate }: { items: NavItem[]; pathname:
         );
       })}
     </ul>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") as "dark" | "light" | null;
+    const currentTheme = savedTheme || "dark";
+    setTheme(currentTheme);
+    document.documentElement.setAttribute("data-theme", currentTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    localStorage.setItem("theme", nextTheme);
+    document.documentElement.setAttribute("data-theme", nextTheme);
+  };
+
+  return (
+    <div className="theme-toggle-premium" onClick={toggleTheme} role="button" aria-label="Toggle light and dark theme">
+      <svg className="toggle-track-icon sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>
+      </svg>
+      <svg className="toggle-track-icon moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
+      </svg>
+      <div className="toggle-knob">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" width="13" height="13">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>
+        </svg>
+      </div>
+    </div>
   );
 }
 
@@ -137,23 +174,24 @@ function NotificationBell({ profileId }: { profileId: string }) {
   }
 
   return (
-    <div className="relative ml-auto">
+    <div className="relative">
       <button
         aria-label="Notifications"
         onClick={() => setOpen((value) => !value)}
-        className="relative grid h-10 w-10 place-items-center rounded-lg text-slate-700 hover:bg-slate-100"
+        className="ping-btn glass-panel"
       >
-        {icon(ICONS.bell)}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+        </svg>
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">
-            {unreadCount > 9 ? "9+" : unreadCount}
-          </span>
+          <span className="ping-dot"></span>
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[320px] max-w-[86vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_18px_48px_rgba(27,42,94,0.14)]">
-          <div className="border-b border-slate-100 px-4 py-3">
-            <p className="text-sm font-black text-slate-900">Notifications</p>
+        <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[320px] max-w-[86vw] overflow-hidden glass-panel">
+          <div className="border-b border-[var(--divider)] px-4 py-3">
+            <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
           </div>
           <div className="max-h-[320px] overflow-y-auto p-2">
             {items.length > 0 ? (
@@ -162,17 +200,17 @@ function NotificationBell({ profileId }: { profileId: string }) {
                   key={item.id}
                   type="button"
                   onClick={() => openNotification(item)}
-                  className="flex w-full gap-3 rounded-lg px-3 py-3 text-left hover:bg-slate-50"
+                  className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
                 >
-                  <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", item.read_at ? "bg-slate-200" : "bg-red-500")} />
+                  <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", item.read_at ? "bg-slate-500" : "bg-red-500")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-slate-900">{item.title}</span>
-                    {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-slate-500">{item.body}</span>}
+                    <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
+                    {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
                   </span>
                 </button>
               ))
             ) : (
-              <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-slate-500">No notifications yet.</p>
+              <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
             )}
           </div>
         </div>
@@ -204,52 +242,54 @@ export function AppShell({
     router.replace("/login");
   }
 
+  const initials = profile?.full_name
+    ? profile.full_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+    : profile?.email?.substring(0, 2).toUpperCase() || "DC";
+
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
-        <Link href="/" className="flex items-center gap-3 px-6 py-5">
-          <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-sm font-bold text-white">
-            DC
-          </div>
-          <span className="text-lg font-extrabold tracking-tight text-slate-900">DeskCulture</span>
+    <div className="dashboard-container p-5">
+      {/* SIDEBAR */}
+      <aside className="admin-sidebar glass-panel hidden lg:flex">
+        <Link href="/" className="logo-section text-[var(--text-primary)] decoration-none">
+          <div className="logo-box">D</div>
+          <span className="logo-text">DeskCulture</span>
         </Link>
-        <nav className="flex-1 overflow-y-auto px-3">
+        <nav className="side-navigation">
           <NavLinks items={items} pathname={pathname} />
         </nav>
-        <div className="border-t border-slate-200 p-4">
-          <div className="flex items-center gap-3">
-            <Avatar name={displayName(profile)} size="md" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold text-slate-900">{profile?.full_name || displayName(profile)}</p>
-              <p className="truncate text-xs capitalize text-slate-500">{profile?.role?.replace("_", " ")}</p>
-            </div>
+        <div className="profile-footer">
+          <div className="profile-avatar">
+            {initials}
+            <span className="online-indicator"></span>
           </div>
-          <button
-            onClick={signOut}
-            className="mt-3 w-full rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-          >
-            Sign out
-          </button>
+          <div className="min-w-0 flex-1">
+            <p className="profile-name-text truncate text-[var(--text-primary)] m-0 leading-tight">{profile?.full_name || displayName(profile)}</p>
+            <p className="profile-email-text truncate text-[var(--text-tertiary)] m-0 mt-0.5 leading-none">{profile?.email}</p>
+          </div>
         </div>
+        <button onClick={signOut} className="btn-signout-premium">
+          Sign Out
+        </button>
       </aside>
 
+      {/* MOBILE NAV (Drawer) */}
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             aria-label="Close navigation"
-            className="absolute inset-0 bg-slate-950/35"
+            className="absolute inset-0 bg-slate-950/35 border-0"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="relative flex h-full w-[280px] max-w-[86vw] flex-col border-r border-slate-200 bg-white shadow-2xl">
+          <aside className="relative flex h-full w-[280px] max-w-[86vw] flex-col glass-panel shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4">
-              <Link href="/" className="flex items-center gap-3" onClick={() => setMobileNavOpen(false)}>
-                <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-primary to-violet-500 text-sm font-bold text-white">DC</div>
-                <span className="text-lg font-extrabold tracking-tight text-slate-900">DeskCulture</span>
+              <Link href="/" className="logo-section text-[var(--text-primary)] decoration-none" onClick={() => setMobileNavOpen(false)}>
+                <div className="logo-box">D</div>
+                <span className="logo-text">DeskCulture</span>
               </Link>
               <button
                 aria-label="Close navigation"
                 onClick={() => setMobileNavOpen(false)}
-                className="grid h-9 w-9 place-items-center rounded-lg text-slate-600 hover:bg-slate-100"
+                className="grid h-9 w-9 place-items-center rounded-lg text-[var(--text-primary)] hover:bg-[var(--surface-soft)] border-0 bg-transparent cursor-pointer"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-5 w-5">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12M18 6 6 18" />
@@ -259,10 +299,10 @@ export function AppShell({
             <nav className="flex-1 overflow-y-auto px-3 pb-4">
               <NavLinks items={items} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
             </nav>
-            <div className="border-t border-slate-200 p-4">
+            <div className="p-4 border-t border-[var(--divider)]">
               <button
                 onClick={signOut}
-                className="w-full rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                className="btn-signout-premium"
               >
                 Sign out
               </button>
@@ -271,25 +311,32 @@ export function AppShell({
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6">
+      {/* MAIN VIEW */}
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <header className="header-topbar">
           <button
             aria-label="Open navigation"
             onClick={() => setMobileNavOpen(true)}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[var(--text-primary)] hover:bg-[var(--surface-soft)] lg:hidden border-0 bg-transparent cursor-pointer"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-5 w-5">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
             </svg>
           </button>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-h3 text-slate-900">{title}</h1>
-            {subtitle && <p className="truncate text-sm text-slate-500">{subtitle}</p>}
+          
+          <div className="welcome-greet">
+            <h1>{title}</h1>
+            {subtitle && <p>{subtitle}</p>}
           </div>
-          {actions}
-          {profile && <NotificationBell profileId={profile.id} />}
+          
+          <div className="actions-topbar">
+            {actions}
+            <ThemeToggle />
+            {profile && <NotificationBell profileId={profile.id} />}
+          </div>
         </header>
-        <main className="flex-1 p-4 sm:p-6">{children}</main>
+
+        <main className="flex-1 min-h-0">{children}</main>
       </div>
     </div>
   );

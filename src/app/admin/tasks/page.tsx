@@ -14,7 +14,13 @@ type DirectoryPerson = { id: string; full_name: string | null; email: string; ro
 export default function AdminTasksPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [assignees, setAssignees] = useState<DirectoryPerson[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -39,6 +45,7 @@ export default function AdminTasksPage() {
       return;
     }
     setProfile(me);
+    sessionStorage.setItem("user_profile", JSON.stringify(me));
     if (me.role === "admin" && me.department_id) setDepartmentId(me.department_id);
 
     const [{ data: depts }, { data: people }, { data: taskRows }] = await Promise.all([
@@ -92,9 +99,9 @@ export default function AdminTasksPage() {
     load();
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -107,30 +114,30 @@ export default function AdminTasksPage() {
     <AppShell profile={profile} title="Tasks" subtitle={profile.role === "super_admin" ? "Org-wide board" : "Your department's board"}>
       <div className="space-y-8">
         <Card>
-          <h2 className="text-base font-bold text-slate-900">New task</h2>
+          <h2 className="text-base font-bold text-[var(--text-primary)]">New task</h2>
           <form onSubmit={createTask} className="mt-4 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-sm font-semibold text-slate-700">
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Title
                 <Input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Design the onboarding email" className="mt-2" />
               </label>
-              <label className="block text-sm font-semibold text-slate-700">
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Due date
                 <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="mt-2" />
               </label>
             </div>
-            <label className="block text-sm font-semibold text-slate-700">
+            <label className="block text-sm font-semibold text-[var(--text-secondary)]">
               Description
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
-                className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-primary focus:ring-4 focus:ring-primary-light"
+                className="mt-2 w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
             </label>
             <div className="grid gap-4 sm:grid-cols-3">
               {profile.role === "super_admin" ? (
-                <label className="block text-sm font-semibold text-slate-700">
+                <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                   Department
                   <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="mt-2">
                     <option value="">Select department</option>
@@ -140,12 +147,12 @@ export default function AdminTasksPage() {
                   </Select>
                 </label>
               ) : (
-                <div className="text-sm font-semibold text-slate-700">
+                <div className="text-sm font-semibold text-[var(--text-secondary)]">
                   Department
-                  <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-600">{deptName(departmentId)}</p>
+                  <p className="mt-2 rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3.5 py-2.5 text-sm text-[var(--text-secondary)]">{deptName(departmentId)}</p>
                 </div>
               )}
-              <label className="block text-sm font-semibold text-slate-700">
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Priority
                 <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)} className="mt-2">
                   {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
@@ -153,7 +160,7 @@ export default function AdminTasksPage() {
                   ))}
                 </Select>
               </label>
-              <label className="block text-sm font-semibold text-slate-700">
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Assign to
                 <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="mt-2">
                   <option value="">Unassigned</option>
@@ -173,7 +180,7 @@ export default function AdminTasksPage() {
         <div className="grid gap-4 lg:grid-cols-4">
           {STATUS_ORDER.map((status) => (
             <div key={status}>
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
                 {STATUS_LABEL[status]} · {tasks.filter((t) => t.status === status).length}
               </h3>
               <div className="space-y-3">
@@ -185,18 +192,18 @@ export default function AdminTasksPage() {
                     onClick={() => router.push(`/tasks/${task.id}`)}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-900">{task.title}</p>
+                      <p className="text-sm font-bold text-[var(--text-primary)]">{task.title}</p>
                       {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">{personName(task.assigned_to)} · {deptName(task.department_id)}</p>
+                    <p className="mt-2 text-xs text-[var(--text-secondary)]">{personName(task.assigned_to)} · {deptName(task.department_id)}</p>
                     <div className="mt-3 flex items-center justify-between">
                       <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
-                      {task.due_date && <span className="text-xs text-slate-400">{new Date(task.due_date).toLocaleDateString()}</span>}
+                      {task.due_date && <span className="text-xs text-[var(--text-tertiary)]">{new Date(task.due_date).toLocaleDateString()}</span>}
                     </div>
                   </Card>
                 ))}
                 {tasks.filter((t) => t.status === status).length === 0 && (
-                  <p className="text-sm text-slate-400">No tasks.</p>
+                  <p className="text-sm text-[var(--text-tertiary)]">No tasks.</p>
                 )}
               </div>
             </div>

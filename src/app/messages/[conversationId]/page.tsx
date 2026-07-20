@@ -277,10 +277,10 @@ export default function ConversationPage() {
             <div key={message.id} className={`flex gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
               <Avatar name={message.author?.full_name || message.author?.email || "?"} size="sm" />
               <div className={`max-w-[72%] ${isMe ? "items-end text-right" : ""}`}>
-                <p className="text-xs font-semibold text-slate-500">
+                <p className="text-xs font-semibold text-[var(--text-secondary)]">
                   {message.author?.full_name || message.author?.email} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </p>
-                <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${isMe ? "bg-primary text-white" : "bg-slate-100 text-slate-800"}`}>
+                <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
                   {parseMessageBody(message.body).map((segment, i) =>
                     segment.type === "text" ? (
                       <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
@@ -292,7 +292,7 @@ export default function ConversationPage() {
                 {msgAttachments.length > 0 && (
                   <div className="mt-1 space-y-1">
                     {msgAttachments.map((a) => (
-                      <button key={a.id} type="button" onClick={() => downloadFile(a)} className="block text-xs font-semibold text-primary hover:underline">
+                      <button key={a.id} type="button" onClick={() => downloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
                         📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
                       </button>
                     ))}
@@ -308,7 +308,7 @@ export default function ConversationPage() {
                         key={emoji}
                         type="button"
                         onClick={() => toggleReaction(message.id, emoji)}
-                        className={`rounded-full border px-2 py-0.5 text-xs ${mine ? "border-primary bg-primary-light" : "border-slate-200 bg-white"}`}
+                        className={`rounded-full border border-[var(--glass-border-soft)] px-2 py-0.5 text-xs transition cursor-pointer ${mine ? "bg-[#8b5cf6] text-white" : "bg-[var(--surface-soft)] text-[var(--text-secondary)]"}`}
                       >
                         {emoji} {count}
                       </button>
@@ -320,29 +320,29 @@ export default function ConversationPage() {
             </div>
           );
         })}
-        {messages.length === 0 && <p className="text-center text-sm text-slate-400">No messages yet. Say hello.</p>}
+        {messages.length === 0 && <p className="text-center text-sm text-[var(--text-tertiary)]">No messages yet. Say hello.</p>}
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-slate-100 p-3">
+      <div className="border-t border-[var(--divider)] p-3">
         {!canPost ? (
-          <p className="text-center text-xs font-semibold text-slate-400">Only the Super Admin can post to Announcements.</p>
+          <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Super Admin can post to Announcements.</p>
         ) : (
           <form onSubmit={sendMessage} className="space-y-2">
             <div className="relative">
               {suggestMentions.length > 0 && (
-                <div className="absolute bottom-full mb-1 w-full max-w-xs rounded-lg border border-slate-200 bg-white shadow-lg">
+                <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
                   {suggestMentions.map((p) => (
-                    <button key={p.id} type="button" onClick={() => pickMention(p)} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">
+                    <button key={p.id} type="button" onClick={() => pickMention(p)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
                       {p.full_name || p.email}
                     </button>
                   ))}
                 </div>
               )}
               {suggestTasks.length > 0 && (
-                <div className="absolute bottom-full mb-1 w-full max-w-xs rounded-lg border border-slate-200 bg-white shadow-lg">
+                <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
                   {suggestTasks.map((t) => (
-                    <button key={t.id} type="button" onClick={() => pickTask(t)} className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50">
+                    <button key={t.id} type="button" onClick={() => pickTask(t)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
                       {t.title}
                     </button>
                   ))}
@@ -353,11 +353,11 @@ export default function ConversationPage() {
                 onChange={(e) => onBodyChange(e.target.value)}
                 rows={2}
                 placeholder="Message... use @ to mention, # to reference a task"
-                className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-primary focus:ring-4 focus:ring-primary-light"
+                className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <input type="file" onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)} className="text-xs" />
+              <input type="file" onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)} className="text-xs text-[var(--text-secondary)]" />
               <Button type="submit" disabled={sending || !body.trim()}>
                 {sending ? "Sending..." : "Send"}
               </Button>
@@ -375,7 +375,7 @@ function TaskChip({ preview, onOpen }: { preview: TaskPreview | null | undefined
   if (preview === undefined) return <Badge tone="neutral">Loading task...</Badge>;
   if (preview === null) return <Badge tone="neutral">Task unavailable</Badge>;
   return (
-    <button type="button" onClick={onOpen} className="mx-0.5 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold underline">
+    <button type="button" onClick={onOpen} className="mx-0.5 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-xs font-bold underline cursor-pointer">
       {preview.title} ({preview.status.replace("_", " ")})
     </button>
   );
@@ -385,11 +385,11 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-400 hover:text-slate-700">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="rounded-full border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2 py-0.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer">
         +
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 mb-1 flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-lg">
+        <div className="absolute bottom-full left-0 mb-1 flex gap-1 rounded-full glass-panel p-1 shadow-lg">
           {REACTION_EMOJI.map((emoji) => (
             <button
               key={emoji}
@@ -398,7 +398,7 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
                 onPick(emoji);
                 setOpen(false);
               }}
-              className="rounded-full px-1.5 py-0.5 text-sm hover:bg-slate-100"
+              className="rounded-full px-1.5 py-0.5 text-sm border-0 bg-transparent text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer"
             >
               {emoji}
             </button>

@@ -4,7 +4,7 @@ import type { InputHTMLAttributes, SelectHTMLAttributes, ReactNode } from "react
 import { cn } from "@/lib/cn";
 
 const fieldBase =
-  "h-11 w-full rounded-lg border border-slate-200 bg-white text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-4 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60";
+  "h-11 w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] text-sm text-[var(--text-primary)] outline-none transition placeholder:text-[var(--text-tertiary)] focus:border-[#8b5cf6] disabled:cursor-not-allowed disabled:opacity-60 backdrop-blur-xl";
 
 type InputProps = InputHTMLAttributes<HTMLInputElement> & { icon?: ReactNode };
 

@@ -21,7 +21,13 @@ type PersonStatus = {
 export default function AdminPeoplePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [people, setPeople] = useState<PersonStatus[]>([]);
 
@@ -46,6 +52,7 @@ export default function AdminPeoplePage() {
       return;
     }
     setProfile(me);
+    sessionStorage.setItem("user_profile", JSON.stringify(me));
 
     const { data: depts } = await supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name");
     setDepartments(depts ?? []);
@@ -122,9 +129,9 @@ export default function AdminPeoplePage() {
     load();
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -137,8 +144,8 @@ export default function AdminPeoplePage() {
       <div className="space-y-8">
         {profile.role === "super_admin" && (
           <Card>
-            <h2 className="text-base font-bold text-slate-900">Departments</h2>
-            <p className="mt-1 text-sm text-slate-500">Create the departments your organization is split into.</p>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Departments</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">Create the departments your organization is split into.</p>
             <form onSubmit={createDepartment} className="mt-4 flex gap-3">
               <Input value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} placeholder="e.g. Marketing" className="flex-1" />
               <Button type="submit" disabled={deptBusy || !newDeptName.trim()}>
@@ -150,16 +157,16 @@ export default function AdminPeoplePage() {
               {departments.map((d) => (
                 <Badge key={d.id} tone="primary">{d.name}</Badge>
               ))}
-              {departments.length === 0 && <p className="text-sm text-slate-400">No departments yet.</p>}
+              {departments.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No departments yet.</p>}
             </div>
           </Card>
         )}
 
         <Card>
-          <h2 className="text-base font-bold text-slate-900">
+          <h2 className="text-base font-bold text-[var(--text-primary)]">
             Invite {profile.role === "super_admin" ? "an Admin" : "an Employee"}
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {profile.role === "super_admin"
               ? "Emails a link to become the Admin of one department."
               : `Emails a link to join ${deptName(profile.department_id)}.`}
@@ -190,14 +197,14 @@ export default function AdminPeoplePage() {
         </Card>
 
         <Card>
-          <h2 className="text-base font-bold text-slate-900">{profile.role === "super_admin" ? "Org directory" : "Your team"}</h2>
+          <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "super_admin" ? "Org directory" : "Your team"}</h2>
           <div className="mt-4 space-y-3">
-            {people.length === 0 && <p className="text-sm text-slate-400">Nobody here yet.</p>}
+            {people.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">Nobody here yet.</p>}
             {people.map((person) => (
-              <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+              <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{person.full_name || person.email}</p>
-                  <p className="text-xs text-slate-500">{person.email} · {deptName(person.department_id)}</p>
+                  <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || person.email}</p>
+                  <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{person.email} · {deptName(person.department_id)}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
