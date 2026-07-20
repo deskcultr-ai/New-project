@@ -110,3 +110,24 @@ export async function POST(request: Request) {
     emailError: inviteError ? inviteError.message : undefined,
   });
 }
+
+export async function DELETE(request: Request) {
+  const owner = await requirePlatformOwner(request);
+  if (!owner) {
+    return NextResponse.json({ error: "Not authorized." }, { status: 403 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "Request ID is required." }, { status: 400 });
+  }
+
+  const admin = await getSupabaseAdmin();
+  const { error } = await admin.from("pending_org_requests").delete().eq("id", id);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
