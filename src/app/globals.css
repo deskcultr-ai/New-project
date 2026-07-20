@@ -1,0 +1,481 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+/* ============================================================
+   DeskCulture design tokens (Tailwind v4 @theme)
+   Generates utilities: bg-primary, text-success, shadow-ds,
+   text-h1, font-sans (Inter), etc.
+   ============================================================ */
+@theme {
+  /* Brand + semantic colors */
+  --color-primary: #4f46e5;
+  --color-primary-light: #eef2ff;
+  --color-primary-dark: #4338ca;
+  --color-success: #10b981;
+  --color-success-light: #ecfdf5;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fffbeb;
+  --color-danger: #ef4444;
+  --color-danger-light: #fef2f2;
+  --color-info: #3b82f6;
+  --color-info-light: #eff6ff;
+
+  /* Typography (Inter) */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --text-h1: 2rem;
+  --text-h1--line-height: 2.5rem;
+  --text-h1--font-weight: 700;
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 2rem;
+  --text-h2--font-weight: 600;
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.75rem;
+  --text-h3--font-weight: 600;
+  --text-h4: 1.125rem;
+  --text-h4--line-height: 1.625rem;
+  --text-h4--font-weight: 500;
+  --text-caption: 0.6875rem;
+  --text-caption--line-height: 0.875rem;
+
+  /* Elevation */
+  --shadow-ds-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-ds: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --shadow-ds-md: 0 12px 32px rgba(15, 23, 42, 0.08);
+  --shadow-ds-lg: 0 24px 60px rgba(15, 23, 42, 0.1);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Anchor targets clear the header when scrolled to */
+section[id] {
+  scroll-margin-top: 96px;
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-14px) rotate(2deg); }
+}
+
+@keyframes float-slower {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+
+.animate-float-slow {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+.animate-float-slower {
+  animation: float-slower 7.5s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 4s ease-in-out infinite;
+}
+
+.reference-scene {
+  isolation: isolate;
+}
+
+.reference-float {
+  animation: reference-float 6s ease-in-out infinite;
+}
+
+.reference-shape {
+  position: absolute;
+  z-index: 0;
+  box-shadow: 0 24px 54px rgba(91, 77, 255, 0.2);
+  animation: reference-float 6s ease-in-out infinite;
+}
+
+@keyframes reference-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* ============================================================
+   Landing hero 3D workspace scene
+   Everything is absolutely positioned inside .landing-scene.
+   The monitor sits centered; exactly three glass cards float
+   flat (no tilt-away) at the top-left, top-right and lower-right
+   corners so none are hidden behind the screen.
+   ============================================================ */
+
+.landing-scene {
+  perspective: 1500px;
+}
+
+/* Soft elliptical ground shadow under the workstation */
+.desk-platform {
+  position: absolute;
+  left: 50%;
+  bottom: 92px;
+  width: min(80%, 520px);
+  height: 96px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(124, 92, 255, 0.22), transparent 70%);
+  transform: translateX(-50%);
+  filter: blur(8px);
+  z-index: 1;
+}
+
+/* Monitor + stand */
+.monitor-group {
+  position: absolute;
+  left: 50%;
+  top: 40px;
+  width: min(60%, 432px);
+  transform: translateX(-50%) rotateX(5deg) rotateY(-6deg);
+  transform-style: preserve-3d;
+  animation: monitor-breathe 8s ease-in-out infinite;
+  z-index: 10;
+}
+
+.monitor-screen {
+  position: relative;
+  height: 300px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 26px;
+  background: linear-gradient(150deg, #ffffff 0%, #f0ecff 100%);
+  box-shadow:
+    0 30px 60px rgba(91, 77, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.screen-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 42px;
+  margin: 14px;
+  padding: 0 16px;
+  border: 1px solid rgba(224, 220, 255, 0.8);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+}
+
+.screen-body {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 14px;
+  padding: 0 18px 18px;
+}
+
+.monitor-neck {
+  width: 50px;
+  height: 52px;
+  margin: -2px auto 0;
+  background: linear-gradient(180deg, rgba(226, 220, 255, 0.95), rgba(190, 181, 247, 0.82));
+  clip-path: polygon(30% 0, 70% 0, 84% 100%, 16% 100%);
+}
+
+.monitor-foot {
+  width: 168px;
+  height: 16px;
+  margin: -1px auto 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #dcd4ff);
+  box-shadow: 0 14px 26px rgba(91, 77, 255, 0.16);
+}
+
+/* Keyboard + mouse resting on the desk */
+.keyboard-3d {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(6px, 1fr));
+  gap: 5px;
+  width: min(42%, 292px);
+  padding: 13px 18px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #e8e2ff);
+  box-shadow: 0 16px 30px rgba(91, 77, 255, 0.14);
+  transform: translateX(-50%) rotateX(56deg);
+  z-index: 6;
+}
+
+.keyboard-3d span {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(112, 98, 205, 0.16);
+}
+
+.mouse-3d {
+  position: absolute;
+  left: calc(50% + 188px);
+  bottom: 84px;
+  width: 26px;
+  height: 42px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #ffffff, #e0daff);
+  box-shadow: 0 12px 22px rgba(91, 77, 255, 0.14);
+  transform: rotateX(56deg);
+  z-index: 6;
+}
+
+/* Floating glass cards — flat, clearly in front of the monitor */
+.float-card {
+  position: absolute;
+  z-index: 30;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 24px 48px rgba(91, 77, 255, 0.18);
+  backdrop-filter: blur(14px);
+  animation: card-drift 6.5s ease-in-out infinite;
+}
+
+/* lower-left */
+.float-card-drive {
+  bottom: 176px;
+  left: 0;
+  width: 190px;
+  padding: 15px;
+  transform: rotate(-2deg);
+  animation-duration: 7s;
+}
+
+/* top-right */
+.float-card-chat {
+  top: 26px;
+  right: 0;
+  width: 212px;
+  padding: 16px;
+  transform: rotate(2deg);
+  animation-duration: 7.5s;
+}
+
+/* lower-right */
+.float-card-analytics {
+  bottom: 60px;
+  right: 6px;
+  width: 208px;
+  padding: 15px;
+  transform: rotate(-1.5deg);
+  animation-duration: 8s;
+}
+
+/* Decorative 3D accents (kept minimal to avoid clutter) */
+.cube-3d {
+  position: absolute;
+  z-index: 4;
+  height: 34px;
+  width: 34px;
+  transform-style: preserve-3d;
+  animation: cube-drift 8s ease-in-out infinite;
+}
+
+.cube-3d span {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #c7bcff, #7c5cff);
+  opacity: 0.88;
+  box-shadow: 0 18px 34px rgba(124, 92, 255, 0.22);
+}
+
+.cube-3d span:nth-child(1) {
+  transform: rotateY(0deg) translateZ(17px);
+}
+
+.cube-3d span:nth-child(2) {
+  transform: rotateY(90deg) translateZ(17px);
+  filter: brightness(0.9);
+}
+
+.cube-3d span:nth-child(3) {
+  transform: rotateX(90deg) translateZ(17px);
+  filter: brightness(1.08);
+}
+
+.cube-3d-one {
+  left: 40%;
+  top: 2px;
+  height: 40px;
+  width: 40px;
+}
+
+.cube-3d-two {
+  right: 34px;
+  top: 168px;
+  height: 30px;
+  width: 30px;
+  animation-delay: -2.6s;
+}
+
+.cube-3d-two span {
+  background: linear-gradient(145deg, #f6b8ff, #c05cff);
+}
+
+.landing-orb {
+  position: absolute;
+  z-index: 5;
+  border-radius: 999px;
+  animation: shape-float 6s ease-in-out infinite;
+}
+
+.landing-orb-one {
+  left: 20%;
+  top: 40px;
+  height: 30px;
+  width: 30px;
+  background: radial-gradient(circle at 34% 28%, #ffffff 0 8%, #9fb0ff 18%, #6d5dfc 68%, #5745d8 100%);
+  box-shadow: 0 16px 28px rgba(109, 93, 252, 0.28);
+}
+
+.landing-orb-two {
+  left: 16%;
+  bottom: 92px;
+  height: 16px;
+  width: 16px;
+  background: radial-gradient(circle at 35% 28%, #ffffff 0 10%, #c8adff 24%, #9b68ff 100%);
+  animation-delay: -1.2s;
+}
+
+/* Potted plant on the desk (lower-left) */
+.plant-3d {
+  position: absolute;
+  left: 44px;
+  bottom: 64px;
+  z-index: 8;
+  height: 88px;
+  width: 64px;
+  transform: rotateZ(-4deg);
+}
+
+.plant-3d .leaf {
+  position: absolute;
+  bottom: 26px;
+  left: 28px;
+  width: 18px;
+  height: 50px;
+  border-radius: 100% 0 100% 0;
+  background: linear-gradient(160deg, #b8d9b0, #70a66d);
+  transform-origin: bottom center;
+}
+
+.leaf-one {
+  transform: rotate(-34deg);
+}
+
+.leaf-two {
+  transform: rotate(4deg);
+}
+
+.leaf-three {
+  transform: rotate(34deg);
+}
+
+.plant-3d .pot {
+  position: absolute;
+  bottom: 0;
+  left: 18px;
+  width: 32px;
+  height: 28px;
+  border-radius: 8px 8px 14px 14px;
+  background: linear-gradient(180deg, #fff3e5, #d9b38a);
+  box-shadow: 0 12px 24px rgba(125, 94, 64, 0.14);
+}
+
+@keyframes monitor-breathe {
+  0%, 100% {
+    transform: translateX(-50%) rotateX(5deg) rotateY(-6deg) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) rotateX(5deg) rotateY(-5deg) translateY(-6px);
+  }
+}
+
+@keyframes card-drift {
+  0%, 100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -12px;
+  }
+}
+
+@keyframes cube-drift {
+  0%, 100% {
+    transform: rotateX(-18deg) rotateY(28deg) translateY(0);
+  }
+  50% {
+    transform: rotateX(-8deg) rotateY(42deg) translateY(-14px);
+  }
+}
+
+@keyframes shape-float {
+  0%, 100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .landing-scene {
+    max-width: 360px;
+    transform: scale(0.9);
+    transform-origin: top center;
+  }
+
+  .screen-body {
+    grid-template-columns: 68px 1fr;
+    gap: 10px;
+    padding-inline: 14px;
+  }
+
+  .float-card-drive {
+    left: 0;
+    width: 150px;
+  }
+
+  .float-card-chat,
+  .float-card-analytics {
+    display: none;
+  }
+
+  .plant-3d {
+    left: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-scene *,
+  .animate-float-slow,
+  .animate-float-slower,
+  .animate-glow-pulse {
+    animation: none !important;
+  }
+}
