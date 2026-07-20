@@ -62,9 +62,9 @@ function navForRole(role: Profile["role"] | undefined): NavItem[] {
   ];
 }
 
-function NavLinks({ items, pathname, onNavigate }: { items: NavItem[]; pathname: string; onNavigate?: () => void }) {
+function NavLinks({ items, pathname, sidebarCollapsed, onNavigate }: { items: NavItem[]; pathname: string; sidebarCollapsed?: boolean; onNavigate?: () => void }) {
   return (
-    <ul className="space-y-1 p-0 list-none">
+    <ul className="space-y-1 p-0 list-none w-full">
       {items.map((item) => {
         const active = item.href === "/admin" || item.href === "/dashboard"
           ? pathname === item.href
@@ -74,13 +74,15 @@ function NavLinks({ items, pathname, onNavigate }: { items: NavItem[]; pathname:
             <Link
               href={item.href}
               onClick={onNavigate}
+              title={sidebarCollapsed ? item.label : undefined}
               className={cn(
                 "nav-link-item flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition decoration-none",
+                sidebarCollapsed ? "justify-center px-0" : "",
                 active ? "active-route text-white" : "text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)]"
               )}
             >
-              {item.icon}
-              {item.label}
+              <span className="shrink-0">{item.icon}</span>
+              {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
             </Link>
           </li>
         );
@@ -235,6 +237,21 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sidebar_collapsed") === "true";
+    }
+    return false;
+  });
+
+  const toggleSidebar = () => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sidebar_collapsed", String(next));
+    }
+  };
+
   const items = navForRole(profile?.role);
 
   async function signOut() {
@@ -247,28 +264,48 @@ export function AppShell({
     : profile?.email?.substring(0, 2).toUpperCase() || "DC";
 
   return (
-    <div className="dashboard-container p-5">
+    <div className={cn("dashboard-container p-5 transition-all duration-300", sidebarCollapsed ? "sidebar-collapsed" : "")}>
       {/* SIDEBAR */}
-      <aside className="admin-sidebar glass-panel hidden lg:flex">
-        <Link href="/" className="logo-section text-[var(--text-primary)] decoration-none">
-          <div className="logo-box">D</div>
-          <span className="logo-text">DeskCulture</span>
-        </Link>
-        <nav className="side-navigation">
-          <NavLinks items={items} pathname={pathname} />
+      <aside className={cn("admin-sidebar glass-panel hidden lg:flex", sidebarCollapsed ? "w-[72px]" : "w-[260px]")}>
+        <div className={cn("logo-section flex items-center text-[var(--text-primary)] w-full mb-6", sidebarCollapsed ? "flex-col gap-3 justify-center px-0 pb-4 border-b border-[var(--divider)]" : "justify-between")}>
+          <Link href="/" className="flex items-center gap-3 decoration-none text-inherit min-w-0">
+            <div className="logo-box shrink-0">D</div>
+            {!sidebarCollapsed && <span className="logo-text truncate font-extrabold text-base">DeskCulture</span>}
+          </Link>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="grid h-8 w-8 place-items-center rounded-lg text-[var(--text-primary)] hover:bg-[var(--surface-soft)] border-0 bg-transparent cursor-pointer shrink-0"
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-5 w-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        </div>
+        <nav className="side-navigation w-full">
+          <NavLinks items={items} pathname={pathname} sidebarCollapsed={sidebarCollapsed} />
         </nav>
-        <div className="profile-footer">
+        <div className="profile-footer w-full">
           <div className="profile-avatar">
             {initials}
             <span className="online-indicator"></span>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="profile-name-text truncate text-[var(--text-primary)] m-0 leading-tight">{profile?.full_name || displayName(profile)}</p>
-            <p className="profile-email-text truncate text-[var(--text-tertiary)] m-0 mt-0.5 leading-none">{profile?.email}</p>
-          </div>
+          {!sidebarCollapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="profile-name-text truncate text-[var(--text-primary)] m-0 leading-tight">{profile?.full_name || displayName(profile)}</p>
+              <p className="profile-email-text truncate text-[var(--text-tertiary)] m-0 mt-0.5 leading-none">{profile?.email}</p>
+            </div>
+          )}
         </div>
-        <button onClick={signOut} className="btn-signout-premium">
-          Sign Out
+        <button onClick={signOut} className={cn("btn-signout-premium flex items-center justify-center gap-2", sidebarCollapsed ? "px-0 py-2.5" : "")} title="Sign Out">
+          {sidebarCollapsed ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-5 w-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
+            </svg>
+          ) : (
+            "Sign Out"
+          )}
         </button>
       </aside>
 
