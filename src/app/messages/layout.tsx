@@ -1,0 +1,199 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { getProfile, type Profile } from "@/lib/session";
+import { AppShell } from "@/components/app-shell";
+import { Input, Badge } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import type { ConversationType } from "@/lib/messaging";
+
+type ConversationRow = {
+  id: string;
+  type: ConversationType;
+  department_id: string | null;
+  dm_profile_a: string | null;
+  dm_profile_b: string | null;
+};
+type DirectoryPerson = { id: string; full_name: string | null; email: string };
+type ListItem = { id: string; type: ConversationType; label: string; unread: number; otherId?: string };
+
+export default function MessagesLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [items, setItems] = useState<ListItem[]>([]);
+  const [online, setOnline] = useState<Set<string>>(new Set());
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [directory, setDirectory] = useState<DirectoryPerson[]>([]);
+
+  const load = useCallback(async (me: Profile) => {
+    const [{ data: depts }, { data: convos }] = await Promise.all([
+      supabase.from("departments").select("id, name").eq("organization_id", me.organization_id),
+      supabase.from("conversations").select("id, type, department_id, dm_profile_a, dm_profile_b"),
+    ]);
+
+    const deptName = (id: string | null) => (depts ?? []).find((d) => d.id === id)?.name ?? "Department";
+    const rows = (convos ?? []) as ConversationRow[];
+
+    const dmOtherIds = rows
+      .filter((c) => c.type === "dm")
+      .map((c) => (c.dm_profile_a === me.id ? c.dm_profile_b : c.dm_profile_a))
+      .filter((id): id is string => !!id);
+
+    const { data: dmPeople } = dmOtherIds.length
+      ? await supabase.from("profiles").select("id, full_name, email").in("id", dmOtherIds)
+      : { data: [] as DirectoryPerson[] };
+
+    const { data: reads } = await supabase.from("conversation_reads").select("conversation_id, last_read_at").eq("profile_id", me.id);
+    const readMap = new Map((reads ?? []).map((r) => [r.conversation_id, r.last_read_at as string]));
+
+    const unreadCounts = await Promise.all(
+      rows.map(async (c) => {
+        const since = readMap.get(c.id);
+        const query = supabase.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", c.id);
+        const { count } = since ? await query.gt("created_at", since) : await query;
+        return count ?? 0;
+      })
+    );
+
+    const built: ListItem[] = rows.map((c, index) => {
+      if (c.type === "announcement") return { id: c.id, type: c.type, label: "Announcements", unread: unreadCounts[index] };
+      if (c.type === "department_channel") return { id: c.id, type: c.type, label: deptName(c.department_id), unread: unreadCounts[index] };
+      const otherId = c.dm_profile_a === me.id ? c.dm_profile_b! : c.dm_profile_a!;
+      const other = (dmPeople ?? []).find((p) => p.id === otherId);
+      return { id: c.id, type: c.type, label: other?.full_name || other?.email || "Direct message", unread: unreadCounts[index], otherId };
+    });
+
+    built.sort((a, b) => {
+      const order = { announcement: 0, department_channel: 1, dm: 2 };
+      return order[a.type] - order[b.type] || a.label.localeCompare(b.label);
+    });
+
+    setItems(built);
+  }, []);
+
+  useEffect(() => {
+    async function init() {
+      const me = await getProfile();
+      if (!me) {
+        router.replace("/login");
+        return;
+      }
+      setProfile(me);
+      await load(me);
+      setLoading(false);
+
+      const { data: directoryData } = await supabase.from("profiles").select("id, full_name, email").neq("id", me.id).order("full_name");
+      setDirectory((directoryData ?? []) as DirectoryPerson[]);
+
+      const presenceChannel = supabase.channel(`presence:org:${me.organization_id}`, { config: { presence: { key: me.id } } });
+      presenceChannel
+        .on("presence", { event: "sync" }, () => {
+          setOnline(new Set(Object.keys(presenceChannel.presenceState())));
+        })
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            await presenceChannel.track({ online_at: new Date().toISOString() });
+          }
+        });
+
+      return () => {
+        supabase.removeChannel(presenceChannel);
+      };
+    }
+    const cleanupPromise = init();
+    return () => {
+      cleanupPromise.then((cleanup) => cleanup?.());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
+
+  async function startDm(personId: string) {
+    const { data, error } = await supabase.rpc("get_or_create_dm", { other_profile_id: personId });
+    if (error || !data) return;
+    setPickerOpen(false);
+    setPickerQuery("");
+    if (profile) await load(profile);
+    router.push(`/messages/${data}`);
+  }
+
+  if (loading || !profile) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+        <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
+      </main>
+    );
+  }
+
+  const filteredDirectory = directory.filter((p) =>
+    (p.full_name || p.email).toLowerCase().includes(pickerQuery.trim().toLowerCase())
+  );
+
+  return (
+    <AppShell profile={profile} title="Messages">
+      <div className="grid h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 p-3">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              className="w-full rounded-lg bg-primary-light px-3 py-2 text-left text-sm font-bold text-primary hover:bg-primary/15"
+            >
+              + New message
+            </button>
+            {pickerOpen && (
+              <div className="mt-2 space-y-2">
+                <Input value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search people..." className="h-9" />
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-100">
+                  {filteredDirectory.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => startDm(p.id)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    >
+                      {p.full_name || p.email}
+                      {online.has(p.id) && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
+                    </button>
+                  ))}
+                  {filteredDirectory.length === 0 && <p className="px-3 py-3 text-center text-xs text-slate-400">No matches.</p>}
+                </div>
+              </div>
+            )}
+          </div>
+          <nav className="flex-1 overflow-y-auto p-2">
+            {items.map((item) => {
+              const active = pathname === `/messages/${item.id}`;
+              return (
+                <Link
+                  key={item.id}
+                  href={`/messages/${item.id}`}
+                  className={cn(
+                    "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+                    active ? "bg-primary-light text-primary" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {item.type === "dm" && item.otherId && (
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", online.has(item.otherId) ? "bg-emerald-500" : "bg-slate-300")} />
+                    )}
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                  {item.unread > 0 && <Badge tone="danger">{item.unread > 9 ? "9+" : item.unread}</Badge>}
+                </Link>
+              );
+            })}
+            {items.length === 0 && <p className="px-3 py-6 text-center text-sm text-slate-400">No conversations yet.</p>}
+          </nav>
+        </div>
+        <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">{children}</div>
+      </div>
+    </AppShell>
+  );
+}
