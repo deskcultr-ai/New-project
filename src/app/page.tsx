@@ -201,10 +201,10 @@ export default function HomePage() {
             </Link>
           ) : (
             <Link
-              href="/register"
+              href="/request-org"
               className="inline-flex h-10 items-center justify-center rounded-full bg-gradient-to-r from-[#6f51f5] to-[#7f50f0] px-6 text-sm font-bold text-white shadow-[0_16px_40px_rgba(99,70,230,0.35)] transition hover:-translate-y-0.5"
             >
-              Sign Up
+              Request Access
             </Link>
           )}
         </div>
@@ -231,10 +231,10 @@ export default function HomePage() {
 
           <div className="mt-9 flex flex-wrap items-center gap-3">
             <Link
-              href="/register"
+              href="/request-org"
               className="inline-flex h-12 items-center gap-2 rounded-full bg-gradient-to-r from-[#6f51f5] to-[#6b4ff6] px-7 text-sm font-bold text-white shadow-[0_16px_40px_rgba(99,70,230,0.35)] transition hover:-translate-y-0.5"
             >
-              Get Started Free
+              Request Access
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="h-4 w-4">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14m-6-6 6 6-6 6" />
               </svg>
@@ -400,14 +400,14 @@ export default function HomePage() {
                   ))}
                 </ul>
                 <Link
-                  href="/register"
+                  href="/request-org"
                   className={`mt-8 h-12 w-full rounded-xl text-sm font-bold transition hover:-translate-y-0.5 ${
                     tier.featured
                       ? "bg-white text-indigo-600 shadow-md"
                       : "bg-gradient-to-r from-indigo-600 to-violet-500 text-white shadow-[0_12px_28px_rgba(99,102,241,0.25)]"
                   }`}
                 >
-                  Get Started
+                  Request Access
                 </Link>
               </div>
             ))}

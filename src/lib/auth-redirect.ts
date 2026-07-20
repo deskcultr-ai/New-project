@@ -10,16 +10,15 @@ export async function getPostAuthRedirect() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, company_id, status, role")
+    .select("id, organization_id, status, role")
     .eq("id", user.id)
     .maybeSingle();
 
-  // The handle_new_user trigger always creates a row, so a missing profile is
-  // an edge case (e.g. trigger not yet run) -> let onboarding sort it out.
-  if (!profile) return "/onboarding";
-
-  // No org yet, or joined but not approved -> onboarding handles both states.
-  if (!profile.company_id || profile.status !== "active") return "/onboarding";
+  // Accounts only ever exist via an accepted invite, which always sets
+  // organization_id/status together -- a missing or disabled profile means
+  // something's wrong (deactivated, or a stale session), not an onboarding
+  // step to walk through.
+  if (!profile || !profile.organization_id || profile.status !== "active") return "/login";
 
   return ["super_admin", "admin"].includes(profile.role) ? "/admin" : "/dashboard";
 }
