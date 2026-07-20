@@ -19,6 +19,14 @@ function authErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+/** Never let a stalled network call leave a button stuck on "Verifying..." forever. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("Request timed out. Check your connection and try again.")), ms)),
+  ]);
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("password");
@@ -43,13 +51,18 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (signInError) {
+    try {
+      const { error: signInError } = await withTimeout(supabase.auth.signInWithPassword({ email: email.trim(), password }), 15000);
+      if (signInError) {
+        setBusy(false);
+        setError(authErrorMessage(signInError, "Unable to sign in. Check your email and password."));
+        return;
+      }
+      router.replace(await getPostAuthRedirect());
+    } catch (timeoutError) {
       setBusy(false);
-      setError(authErrorMessage(signInError, "Unable to sign in. Check your email and password."));
-      return;
+      setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));
     }
-    router.replace(await getPostAuthRedirect());
   }
 
   async function requestCode(event: React.FormEvent) {
@@ -57,10 +70,12 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { shouldCreateUser: false },
-    });
+    let otpError: unknown = null;
+    try {
+      ({ error: otpError } = await withTimeout(supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } }), 15000));
+    } catch (timeoutError) {
+      otpError = timeoutError;
+    }
 
     setBusy(false);
     if (otpError) {
@@ -76,18 +91,21 @@ export default function LoginPage() {
     setBusy(true);
     setError("");
 
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: code.trim(),
-      type: "email",
-    });
-
-    if (verifyError) {
+    try {
+      const { error: verifyError } = await withTimeout(
+        supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" }),
+        15000
+      );
+      if (verifyError) {
+        setBusy(false);
+        setError(authErrorMessage(verifyError, "That code didn't work. Request a new one and use only the latest email."));
+        return;
+      }
+      router.replace(await getPostAuthRedirect());
+    } catch (timeoutError) {
       setBusy(false);
-      setError(authErrorMessage(verifyError, "That code didn't work. Check it and try again."));
-      return;
+      setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));
     }
-    router.replace(await getPostAuthRedirect());
   }
 
   return (
@@ -160,7 +178,15 @@ export default function LoginPage() {
               {message && <Alert tone="info">{message}</Alert>}
               <label className="block text-sm font-semibold text-slate-700">
                 6-digit code
-                <Input required value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" className="mt-2 h-12 rounded-2xl font-mono tracking-widest" />
+                <Input
+                  required
+                  inputMode="numeric"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="123456"
+                  className="mt-2 h-12 rounded-2xl font-mono tracking-widest"
+                />
+                <span className="mt-1 block text-xs font-normal text-slate-400">Use the code from your most recent email only.</span>
               </label>
               {error && <Alert tone="danger">{error}</Alert>}
               <Button type="submit" disabled={busy} className="h-12 w-full rounded-2xl">
