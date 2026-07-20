@@ -578,37 +578,39 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   <Link href="/admin/people" className="btn-view-all">View all</Link>
                 </div>
 
-                {filteredDepartments.length > 0 ? (
-                  filteredDepartments.map((d, index) => {
-                    const gradients = [
-                      "linear-gradient(135deg,#818cf8,#6366f1)",
-                      "linear-gradient(135deg,#2dd4bf,#14b8a6)",
-                      "linear-gradient(135deg,#c084fc,#a855f7)",
-                      "linear-gradient(135deg,#f9a8d4,#f472b6)",
-                      "linear-gradient(135deg,#60a5fa,#3b82f6)"
-                    ];
-                    const grad = gradients[index % gradients.length];
-                    return (
-                      <div className="dept-row" key={d.id}>
-                        <div className="dept-badge" style={{ background: grad }}>
-                          {d.name.substring(0, 1).toUpperCase()}
-                        </div>
-                        <div className="dept-info-box">
-                          <div className="dept-name-text truncate">{d.name}</div>
-                          <div className="dept-meta-text">{d.userCount} users • {d.taskCount} tasks</div>
-                        </div>
-                        <div className="dept-progress-block">
-                          <div className="dept-progress-pct">{d.completionRate}%</div>
-                          <div className="dept-progress-bar">
-                            <div className="dept-progress-fill" style={{ width: `${d.completionRate}%`, background: grad }}></div>
+                <div className="dept-scroll-container mt-2" style={{ maxHeight: "330px", overflowY: "auto", paddingRight: "4px" }}>
+                  {filteredDepartments.length > 0 ? (
+                    filteredDepartments.map((d, index) => {
+                      const gradients = [
+                        "linear-gradient(135deg,#818cf8,#6366f1)",
+                        "linear-gradient(135deg,#2dd4bf,#14b8a6)",
+                        "linear-gradient(135deg,#c084fc,#a855f7)",
+                        "linear-gradient(135deg,#f9a8d4,#f472b6)",
+                        "linear-gradient(135deg,#60a5fa,#3b82f6)"
+                      ];
+                      const grad = gradients[index % gradients.length];
+                      return (
+                        <div className="dept-row" key={d.id}>
+                          <div className="dept-badge" style={{ background: grad }}>
+                            {d.name.substring(0, 1).toUpperCase()}
+                          </div>
+                          <div className="dept-info-box">
+                            <div className="dept-name-text truncate">{d.name}</div>
+                            <div className="dept-meta-text">{d.userCount} users • {d.taskCount} tasks</div>
+                          </div>
+                          <div className="dept-progress-block">
+                            <div className="dept-progress-pct">{d.completionRate}%</div>
+                            <div className="dept-progress-bar">
+                              <div className="dept-progress-fill" style={{ width: `${d.completionRate}%`, background: grad }}></div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="py-6 text-center text-sm font-medium text-slate-400">No departments found.</p>
-                )}
+                      );
+                    })
+                  ) : (
+                    <p className="py-6 text-center text-sm font-medium text-slate-400">No departments found.</p>
+                  )}
+                </div>
               </div>
 
               {/* Tasks Overview Chart */}
