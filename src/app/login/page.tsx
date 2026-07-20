@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getPostAuthRedirect } from "@/lib/auth-redirect";
+import { getPostAuthRedirectSafe } from "@/lib/auth-redirect";
+import { withTimeout } from "@/lib/with-timeout";
 import { Button, Input, Alert } from "@/components/ui";
 
 type Mode = "password" | "otp";
@@ -19,13 +20,6 @@ function authErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-/** Never let a stalled network call leave a button stuck on "Verifying..." forever. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error("Request timed out. Check your connection and try again.")), ms)),
-  ]);
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -58,7 +52,7 @@ export default function LoginPage() {
         setError(authErrorMessage(signInError, "Unable to sign in. Check your email and password."));
         return;
       }
-      router.replace(await getPostAuthRedirect());
+      router.replace(await getPostAuthRedirectSafe());
     } catch (timeoutError) {
       setBusy(false);
       setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));
@@ -101,7 +95,7 @@ export default function LoginPage() {
         setError(authErrorMessage(verifyError, "That code didn't work. Request a new one and use only the latest email."));
         return;
       }
-      router.replace(await getPostAuthRedirect());
+      router.replace(await getPostAuthRedirectSafe());
     } catch (timeoutError) {
       setBusy(false);
       setError(authErrorMessage(timeoutError, "Something went wrong. Try again."));

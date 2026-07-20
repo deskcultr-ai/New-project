@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getPostAuthRedirect } from "@/lib/auth-redirect";
+import { getPostAuthRedirectSafe } from "@/lib/auth-redirect";
+import { withTimeout } from "@/lib/with-timeout";
 import { Button, Input, Alert } from "@/components/ui";
 
 export default function SetPasswordPage() {
@@ -41,17 +42,22 @@ export default function SetPasswordPage() {
 
     setBusy(true);
     setError("");
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setBusy(false);
-    if (updateError) {
-      setError(updateError.message);
-      return;
+    try {
+      const { error: updateError } = await withTimeout(supabase.auth.updateUser({ password }), 15000);
+      if (updateError) {
+        setBusy(false);
+        setError(updateError.message);
+        return;
+      }
+      router.replace(await getPostAuthRedirectSafe());
+    } catch (timeoutError) {
+      setBusy(false);
+      setError(timeoutError instanceof Error ? timeoutError.message : "Something went wrong. Try again.");
     }
-    router.replace(await getPostAuthRedirect());
   }
 
   async function skip() {
-    router.replace(await getPostAuthRedirect());
+    router.replace(await getPostAuthRedirectSafe());
   }
 
   if (checking) {

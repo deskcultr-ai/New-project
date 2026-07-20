@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { getPostAuthRedirect } from "@/lib/auth-redirect";
+import { getPostAuthRedirectSafe } from "@/lib/auth-redirect";
+import { withTimeout } from "@/lib/with-timeout";
 import { supabase } from "@/lib/supabase";
 
 function AuthCallbackContent() {
@@ -15,61 +16,67 @@ function AuthCallbackContent() {
     let cancelled = false;
 
     async function handleCallback() {
-      const providerError = searchParams.get("error_description") ?? searchParams.get("error");
-      if (providerError) {
-        setError(providerError);
-        return;
-      }
+      try {
+        const providerError = searchParams.get("error_description") ?? searchParams.get("error");
+        if (providerError) {
+          setError(providerError);
+          return;
+        }
 
-      const code = searchParams.get("code");
-      const tokenHash = searchParams.get("token_hash");
-      const type = searchParams.get("type");
+        const code = searchParams.get("code");
+        const tokenHash = searchParams.get("token_hash");
+        const type = searchParams.get("type");
 
-      if (code) {
-        // detectSessionInUrl is disabled on the client to avoid a race where
-        // supabase-js tries to exchange the same one-time code on init.
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (cancelled) return;
-        if (exchangeError) {
-          const { data: existing } = await supabase.auth.getSession();
-          if (!cancelled && existing.session) {
-            await finish();
+        if (code) {
+          // detectSessionInUrl is disabled on the client to avoid a race where
+          // supabase-js tries to exchange the same one-time code on init.
+          const { error: exchangeError } = await withTimeout(supabase.auth.exchangeCodeForSession(code), 15000);
+          if (cancelled) return;
+          if (exchangeError) {
+            const { data: existing } = await withTimeout(supabase.auth.getSession(), 10000);
+            if (!cancelled && existing.session) {
+              await finish();
+              return;
+            }
+            setError(`Could not complete sign in: ${exchangeError.message}. Please try again from the login page.`);
             return;
           }
-          setError(`Could not complete sign in: ${exchangeError.message}. Please try again from the login page.`);
+          await finish();
           return;
         }
-        await finish();
-        return;
-      }
 
-      if (tokenHash && type) {
-        const { error: verifyError } = await supabase.auth.verifyOtp({
-          token_hash: tokenHash,
-          type: type as "email" | "invite" | "recovery",
-        });
-        if (cancelled) return;
-        if (verifyError) {
-          setError(`Could not complete sign in: ${verifyError.message}. Please try again from the login page.`);
+        if (tokenHash && type) {
+          const { error: verifyError } = await withTimeout(
+            supabase.auth.verifyOtp({ token_hash: tokenHash, type: type as "email" | "invite" | "recovery" }),
+            15000
+          );
+          if (cancelled) return;
+          if (verifyError) {
+            setError(`Could not complete sign in: ${verifyError.message}. Please try again from the login page.`);
+            return;
+          }
+          // Native invite links land here with a profile already created
+          // (by the on_auth_user_created trigger) but no password set yet --
+          // send them to set one before routing into the app.
+          if (type === "invite") {
+            if (!cancelled) router.replace("/set-password");
+            return;
+          }
+          await finish();
           return;
         }
-        // Native invite links land here with a profile already created
-        // (by the on_auth_user_created trigger) but no password set yet --
-        // send them to set one before routing into the app.
-        if (type === "invite") {
-          if (!cancelled) router.replace("/set-password");
-          return;
-        }
-        await finish();
-        return;
-      }
 
-      setError("No sign-in code was returned. Please start the sign-in again from the login page.");
+        setError("No sign-in code was returned. Please start the sign-in again from the login page.");
+      } catch (timeoutError) {
+        if (!cancelled) {
+          setError(timeoutError instanceof Error ? timeoutError.message : "Something went wrong. Please try again from the login page.");
+        }
+      }
     }
 
     async function finish() {
       if (cancelled) return;
-      const redirectTo = await getPostAuthRedirect();
+      const redirectTo = await getPostAuthRedirectSafe();
       if (!cancelled) router.replace(redirectTo);
     }
 
