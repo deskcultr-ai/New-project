@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -26,6 +26,12 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>("password");
   const [otpStep, setOtpStep] = useState<OtpStep>("email");
   const [email, setEmail] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  }, []);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);

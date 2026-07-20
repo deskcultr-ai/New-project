@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, Input, Alert } from "@/components/ui";
 
 export default function RequestOrgPage() {
   const [companyName, setCompanyName] = useState("");
   const [contactName, setContactName] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  }, []);
   const [workEmail, setWorkEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);

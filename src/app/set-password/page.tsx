@@ -17,6 +17,9 @@ export default function SetPasswordPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
     async function check() {
       const { data } = await supabase.auth.getUser();
       if (!data.user) {
