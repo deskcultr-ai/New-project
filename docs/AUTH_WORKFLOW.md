@@ -104,8 +104,26 @@ SMTP with:
 | Port | `465` (SSL) |
 | Username | `resend` |
 | Password | your Resend API key (the same one previously used directly — `re_...`) |
-| Sender email | `onboarding@resend.dev`, or your own verified domain in Resend once you have one |
+| Sender email | **`onboarding@resend.dev`** — see warning below |
 | Sender name | `Deskcultr` |
+
+**Confirmed by a live send test:** setting "Sender email address" to
+`deskcultr@gmail.com` (or any other address on a domain you haven't
+verified in Resend) makes *every* send fail — including to
+`deskcultr@gmail.com` itself — with `"Error sending invite/magic link
+email"`. Resend will only relay mail whose `From` address is on a domain
+you've proven you own via DNS (Settings → Domains in Resend), and Gmail's
+domain isn't yours to verify. `onboarding@resend.dev` is Resend's own
+pre-verified shared domain — use that as the sender until you've verified
+a real domain of your own.
+
+Even with the sender fixed, an unverified Resend account is in **sandbox
+mode**: it can only deliver to the email address you signed up to Resend
+with (confirmed by test: sending to a third-party address returned
+`"Error sending invite email"` immediately, not a timeout). Until you
+verify a domain at **resend.com/domains**, real end-to-end testing only
+works if the invited email matches your Resend account's own email.
+Verifying a domain removes this restriction entirely.
 
 ### 5b. Email templates — Authentication → Emails → Templates
 
@@ -139,6 +157,37 @@ not just the link:
 Confirm the redirect allow-list includes
 `https://deskculture.deskcultr.workers.dev/auth/callback` (and your local
 dev URL, `http://localhost:3000/auth/callback`, if you test locally).
+
+## Walkthrough: approving a request as the platform owner
+
+`deskcultr@gmail.com` has no password (its only login history is the old
+app's Google sign-in, which New doesn't support) — so the platform owner
+signs in via the **OTP tab**, not password:
+
+1. Go to `/login` → "Email code" tab → enter `deskcultr@gmail.com` → Send code.
+2. Check that inbox for the 6-digit code (this email only arrives once SMTP
+   is fixed per 5a above), type it in, submit.
+3. Go directly to **`/platform-admin/requests`** — there's no nav link to
+   it on purpose (it's not part of any org, so it doesn't belong in the
+   AppShell sidebar); it's a URL you go to directly, gated by the
+   `PLATFORM_OWNER_EMAILS` check described in Section 1.
+4. Each pending request shows Approve/Reject. Approve fires the Super
+   Admin invite email (Section 2) to that request's work email.
+
+## Walkthrough: how an Employee (or Admin) signs in
+
+Nobody signs up — every non-owner account starts as an invite:
+
+1. A Super Admin creates a department and invites an Admin to it, from
+   `/admin/people`. That Admin then invites Employees into their own
+   department from the same page.
+2. The invitee gets the "Invite user" email → clicks the link →
+   `/auth/callback` → `/set-password` (Section 3) → sets a password or
+   skips it.
+3. From then on they use `/login` like anyone else — either tab:
+   **Password**, or **Email code** (OTP) if they skipped setting one.
+4. `getPostAuthRedirect()` sends Admins to `/admin`, Employees to
+   `/dashboard`, automatically, based on their `profiles.role`.
 
 ## Notes on this pass's cleanup
 
