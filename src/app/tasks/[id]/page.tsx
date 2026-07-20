@@ -53,7 +53,13 @@ export default function TaskDetailPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -81,6 +87,7 @@ export default function TaskDetailPage() {
       return;
     }
     setProfile(me);
+    sessionStorage.setItem("user_profile", JSON.stringify(me));
 
     const [{ data: taskRow, error: taskErr }, { data: commentRows }, { data: attachmentRows }] = await Promise.all([
       supabase
@@ -218,9 +225,9 @@ export default function TaskDetailPage() {
     preview.open({ url: data.signedUrl, name: attachment.file_name, contentType: attachment.content_type });
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -229,7 +236,7 @@ export default function TaskDetailPage() {
   if (notFound || !task) {
     return (
       <AppShell profile={profile} title="Task not found">
-        <Card className="text-center text-sm text-slate-500">
+        <Card className="text-center text-sm text-[var(--text-tertiary)]">
           This task doesn&apos;t exist, or you don&apos;t have access to it.
         </Card>
       </AppShell>
@@ -248,27 +255,27 @@ export default function TaskDetailPage() {
               {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
               <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
             </div>
-            {task.description && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">{task.description}</p>}
-            <dl className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-500">
+            {task.description && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{task.description}</p>}
+            <dl className="mt-4 grid grid-cols-2 gap-3 text-xs text-[var(--text-tertiary)]">
               <div>
                 <dt className="font-semibold uppercase tracking-wide">Assignee</dt>
-                <dd className="mt-1 text-slate-700">{personLabel(task.assignee)}</dd>
+                <dd className="mt-1 text-[var(--text-secondary)]">{personLabel(task.assignee)}</dd>
               </div>
               <div>
                 <dt className="font-semibold uppercase tracking-wide">Created by</dt>
-                <dd className="mt-1 text-slate-700">{personLabel(task.creator)}</dd>
+                <dd className="mt-1 text-[var(--text-secondary)]">{personLabel(task.creator)}</dd>
               </div>
               <div>
                 <dt className="font-semibold uppercase tracking-wide">Due date</dt>
-                <dd className="mt-1 text-slate-700">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "—"}</dd>
+                <dd className="mt-1 text-[var(--text-secondary)]">{task.due_date ? new Date(task.due_date).toLocaleDateString() : "—"}</dd>
               </div>
             </dl>
           </Card>
 
           <Card>
-            <h2 className="text-base font-bold text-slate-900">Update</h2>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Update</h2>
             <form onSubmit={saveTask} className="mt-4 grid gap-4 sm:grid-cols-2">
-              <label className="block text-sm font-semibold text-slate-700">
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Status
                 <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatus)} className="mt-2">
                   {STATUS_ORDER.map((s) => (
@@ -276,13 +283,13 @@ export default function TaskDetailPage() {
                   ))}
                 </Select>
               </label>
-              <label className="flex items-center gap-2 self-end pb-2.5 text-sm font-semibold text-slate-700">
+              <label className="flex items-center gap-2 self-end pb-2.5 text-sm font-semibold text-[var(--text-secondary)]">
                 <input type="checkbox" checked={isBlocked} onChange={(e) => setIsBlocked(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
                 Blocked
               </label>
               {canEditFully && (
                 <>
-                  <label className="block text-sm font-semibold text-slate-700">
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                     Priority
                     <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)} className="mt-2">
                       {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
@@ -290,7 +297,7 @@ export default function TaskDetailPage() {
                       ))}
                     </Select>
                   </label>
-                  <label className="block text-sm font-semibold text-slate-700">
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                     Assignee
                     <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="mt-2">
                       <option value="">Unassigned</option>
@@ -315,15 +322,15 @@ export default function TaskDetailPage() {
           </Card>
 
           <Card>
-            <h2 className="text-base font-bold text-slate-900">Comments</h2>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Comments</h2>
             <div className="mt-4 space-y-4">
-              {comments.length === 0 && <p className="text-sm text-slate-400">No comments yet.</p>}
+              {comments.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No comments yet.</p>}
               {comments.map((comment) => (
-                <div key={comment.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                  <p className="text-xs font-semibold text-slate-500">
+                <div key={comment.id} className="border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)]">
                     {personLabel(comment.author)} · {new Date(comment.created_at).toLocaleString()}
                   </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">{comment.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--text-primary)]">{comment.body}</p>
                 </div>
               ))}
             </div>
@@ -333,7 +340,7 @@ export default function TaskDetailPage() {
                 onChange={(e) => setCommentBody(e.target.value)}
                 rows={3}
                 placeholder="Add a comment..."
-                className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 outline-none focus:border-primary focus:ring-4 focus:ring-primary-light"
+                className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
               {commentError && <Alert tone="danger">{commentError}</Alert>}
               <Button type="submit" disabled={commentBusy || !commentBody.trim()}>
@@ -345,10 +352,10 @@ export default function TaskDetailPage() {
 
         <div>
           <Card>
-            <h2 className="text-base font-bold text-slate-900">Attachments</h2>
-            <p className="mt-1 text-xs text-slate-500">Re-uploading a file with the same name keeps earlier versions.</p>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Attachments</h2>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">Re-uploading a file with the same name keeps earlier versions.</p>
             <div className="mt-4 space-y-3">
-              {attachments.length === 0 && <p className="text-sm text-slate-400">No files yet.</p>}
+              {attachments.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No files yet.</p>}
               {groupAttachmentVersions(attachments).map((versions) => {
                 const [latest, ...older] = versions;
                 return <AttachmentGroup key={latest.id} latest={latest} older={older} onOpen={openFile} />;
@@ -356,9 +363,9 @@ export default function TaskDetailPage() {
             </div>
             <label className="mt-4 block">
               <span className="sr-only">Upload a file</span>
-              <input type="file" onChange={uploadFile} disabled={uploadBusy} className="text-sm" />
+              <input type="file" onChange={uploadFile} disabled={uploadBusy} className="text-sm text-[var(--text-secondary)]" />
             </label>
-            {uploadBusy && <p className="mt-2 text-xs text-slate-500">Uploading...</p>}
+            {uploadBusy && <p className="mt-2 text-xs text-[var(--text-secondary)]">Uploading...</p>}
             {uploadError && <Alert tone="danger" className="mt-3">{uploadError}</Alert>}
           </Card>
         </div>
@@ -371,27 +378,27 @@ export default function TaskDetailPage() {
 function AttachmentGroup({ latest, older, onOpen }: { latest: Attachment; older: Attachment[]; onOpen: (a: Attachment) => void }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="rounded-lg border border-slate-100">
+    <div className="rounded-xl border border-[var(--divider)]">
       <button
         type="button"
         onClick={() => onOpen(latest)}
-        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-primary-light"
+        className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-[var(--surface-soft)] border-0 bg-transparent cursor-pointer"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-semibold text-slate-800">{latest.file_name}</span>
-          <span className="block text-xs text-slate-500">{(latest.file_size / 1024).toFixed(0)} KB</span>
+          <span className="block truncate font-semibold text-[var(--text-primary)]">{latest.file_name}</span>
+          <span className="block text-xs text-[var(--text-tertiary)]">{(latest.file_size / 1024).toFixed(0)} KB</span>
         </span>
         {older.length > 0 && <Badge tone="neutral">v{older.length + 1}</Badge>}
       </button>
       {older.length > 0 && (
-        <div className="border-t border-slate-100 px-3 py-2">
-          <button type="button" onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-primary">
+        <div className="border-t border-[var(--divider)] px-3 py-2">
+          <button type="button" onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-primary border-0 bg-transparent cursor-pointer">
             {expanded ? "Hide" : `${older.length} earlier version${older.length > 1 ? "s" : ""}`}
           </button>
           {expanded && (
             <div className="mt-2 space-y-1">
               {older.map((version, i) => (
-                <button key={version.id} type="button" onClick={() => onOpen(version)} className="block text-xs text-slate-600 hover:text-primary hover:underline">
+                <button key={version.id} type="button" onClick={() => onOpen(version)} className="block text-xs text-[var(--text-secondary)] hover:text-primary hover:underline border-0 bg-transparent cursor-pointer">
                   v{older.length - i} · {new Date(version.created_at).toLocaleString()}
                 </button>
               ))}

@@ -17,7 +17,13 @@ type ResourceFile = { name: string; size: number; contentType: string | null };
 export default function DepartmentDrivePage() {
   const params = useParams<{ departmentId: string }>();
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [department, setDepartment] = useState<Department | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -53,6 +59,7 @@ export default function DepartmentDrivePage() {
         return;
       }
       setProfile(me);
+      sessionStorage.setItem("user_profile", JSON.stringify(me));
 
       const { data: dept, error: deptErr } = await supabase.from("departments").select("id, name").eq("id", params.departmentId).maybeSingle();
       if (deptErr || !dept) {
@@ -113,9 +120,9 @@ export default function DepartmentDrivePage() {
     loadResources(profile.organization_id);
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -124,7 +131,7 @@ export default function DepartmentDrivePage() {
   if (notFound || !department) {
     return (
       <AppShell profile={profile} title="Department not found">
-        <Card className="text-center text-sm text-slate-500">This department doesn&apos;t exist, or you don&apos;t have access to it.</Card>
+        <Card className="text-center text-sm text-[var(--text-tertiary)]">This department doesn&apos;t exist, or you don&apos;t have access to it.</Card>
       </AppShell>
     );
   }
@@ -134,7 +141,7 @@ export default function DepartmentDrivePage() {
       <div className="space-y-8">
         <Card>
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-slate-900">Resources</h2>
+            <h2 className="text-base font-bold text-[var(--text-primary)]">Resources</h2>
             {canWriteResources && (
               <label className="cursor-pointer text-xs font-bold text-primary">
                 {resourceBusy ? "Uploading..." : "+ Upload"}
@@ -142,7 +149,7 @@ export default function DepartmentDrivePage() {
               </label>
             )}
           </div>
-          <p className="mt-1 text-xs text-slate-500">Templates, SOPs, and reference docs for this department.</p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">Templates, SOPs, and reference docs for this department.</p>
           {resourceError && <Alert tone="danger" className="mt-3">{resourceError}</Alert>}
           <div className="mt-4 space-y-2">
             {resources.map((file) => (
@@ -150,34 +157,34 @@ export default function DepartmentDrivePage() {
                 key={file.name}
                 type="button"
                 onClick={() => downloadResource(file)}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-primary-light"
+                className="flex w-full items-center justify-between rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-left text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)] bg-transparent cursor-pointer"
               >
-                <span className="truncate font-semibold text-slate-800">{file.name}</span>
-                <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
+                <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
+                <span className="text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
               </button>
             ))}
-            {resources.length === 0 && <p className="text-sm text-slate-400">No resources yet.</p>}
+            {resources.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No resources yet.</p>}
           </div>
         </Card>
 
         <Card>
-          <h2 className="text-base font-bold text-slate-900">Task folders</h2>
+          <h2 className="text-base font-bold text-[var(--text-primary)]">Task folders</h2>
           <div className="mt-4 space-y-2">
             {tasks.map((task) => (
-              <div key={task.id} className="rounded-lg border border-slate-100">
-                <button type="button" onClick={() => toggleTask(task.id)} className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-slate-50">
-                  <span className="font-semibold text-slate-800">{task.title}</span>
-                  <span className="text-xs uppercase text-slate-400">{task.status.replace("_", " ")}</span>
+              <div key={task.id} className="rounded-xl border border-[var(--divider)]">
+                <button type="button" onClick={() => toggleTask(task.id)} className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-[var(--surface-soft)] bg-transparent border-0 cursor-pointer">
+                  <span className="font-semibold text-[var(--text-primary)]">{task.title}</span>
+                  <span className="text-xs uppercase text-[var(--text-tertiary)]">{task.status.replace("_", " ")}</span>
                 </button>
                 {expandedTask === task.id && (
-                  <div className="border-t border-slate-100 p-3">
+                  <div className="border-t border-[var(--divider)] p-3">
                     <div className="space-y-1">
                       {(taskAttachments[task.id] ?? []).map((a) => (
-                        <button key={a.id} type="button" onClick={() => downloadTaskFile(a)} className="block text-xs font-semibold text-primary hover:underline">
+                        <button key={a.id} type="button" onClick={() => downloadTaskFile(a)} className="block text-xs font-semibold text-primary hover:underline border-0 bg-transparent cursor-pointer">
                           {a.file_name} ({formatBytes(a.file_size)})
                         </button>
                       ))}
-                      {(taskAttachments[task.id] ?? []).length === 0 && <p className="text-xs text-slate-400">No files on this task.</p>}
+                      {(taskAttachments[task.id] ?? []).length === 0 && <p className="text-xs text-[var(--text-tertiary)]">No files on this task.</p>}
                     </div>
                     <Button variant="ghost" size="sm" className="mt-2" onClick={() => router.push(`/tasks/${task.id}`)}>
                       Open task
@@ -186,7 +193,7 @@ export default function DepartmentDrivePage() {
                 )}
               </div>
             ))}
-            {tasks.length === 0 && <p className="text-sm text-slate-400">No tasks in this department yet.</p>}
+            {tasks.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No tasks in this department yet.</p>}
           </div>
         </Card>
       </div>

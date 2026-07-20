@@ -14,7 +14,13 @@ type PersonalFile = { name: string; size: number; contentType: string | null };
 export default function PersonalDrivePage() {
   const params = useParams<{ profileId: string }>();
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [loading, setLoading] = useState(true);
   const [files, setFiles] = useState<PersonalFile[]>([]);
   const [busy, setBusy] = useState(false);
@@ -45,6 +51,7 @@ export default function PersonalDrivePage() {
         return;
       }
       setProfile(me);
+      sessionStorage.setItem("user_profile", JSON.stringify(me));
       await load(me);
       setLoading(false);
     }
@@ -77,9 +84,9 @@ export default function PersonalDrivePage() {
     if (data) preview.open({ url: data.signedUrl, name: file.name, contentType: file.contentType });
   }
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
-      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+      <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
       </main>
     );
@@ -91,7 +98,7 @@ export default function PersonalDrivePage() {
     <AppShell profile={profile} title={isOwn ? "My Personal Folder" : "Personal Folder"}>
       <Card>
         <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-500">Private working space. {isOwn ? "Only you" : "You"} and org admins can see this.</p>
+          <p className="text-sm text-[var(--text-secondary)]">Private working space. {isOwn ? "Only you" : "You"} and org admins can see this.</p>
           <label className="cursor-pointer text-xs font-bold text-primary">
             {busy ? "Uploading..." : "+ Upload"}
             <input type="file" onChange={uploadFile} disabled={busy} className="hidden" />
@@ -104,13 +111,13 @@ export default function PersonalDrivePage() {
               key={file.name}
               type="button"
               onClick={() => downloadFile(file)}
-              className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-left text-sm hover:border-primary/40 hover:bg-primary-light"
+              className="flex w-full items-center justify-between rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-left text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)] bg-transparent cursor-pointer"
             >
-              <span className="truncate font-semibold text-slate-800">{file.name}</span>
-              <span className="text-xs text-slate-500">{formatBytes(file.size)}</span>
+              <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
+              <span className="text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
             </button>
           ))}
-          {files.length === 0 && <p className="text-sm text-slate-400">No files yet.</p>}
+          {files.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No files yet.</p>}
         </div>
       </Card>
       <FilePreviewModal target={preview.target} onClose={preview.close} />
