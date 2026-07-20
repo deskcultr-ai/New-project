@@ -578,7 +578,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   <Link href="/admin/people" className="btn-view-all">View all</Link>
                 </div>
 
-                <div className="dept-scroll-container mt-2" style={{ maxHeight: "330px", overflowY: "auto", paddingRight: "4px" }}>
+                <div className="dept-scroll-container mt-2 no-scrollbar" style={{ maxHeight: "330px", overflowY: "auto", paddingRight: "4px" }}>
                   {filteredDepartments.length > 0 ? (
                     filteredDepartments.map((d, index) => {
                       const gradients = [

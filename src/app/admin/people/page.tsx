@@ -307,7 +307,7 @@ export default function AdminPeoplePage() {
                     {/* Employees */}
                     <div>
                       <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Employees</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
                         {people.filter((p) => p.department_id === selectedDeptId).map((person) => (
                           <div key={person.profile_id} className="text-xs bg-[var(--surface-soft)] p-2 rounded-xl">
                             <span className="font-semibold text-[var(--text-primary)] block truncate">{person.full_name || person.email}</span>
@@ -323,7 +323,7 @@ export default function AdminPeoplePage() {
                     {/* Tasks */}
                     <div>
                       <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Tasks</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
                         {deptTasks.map((t) => (
                           <div key={t.id} className="text-xs bg-[var(--surface-soft)] p-2 rounded-xl flex justify-between items-center gap-2">
                             <span className="font-semibold text-[var(--text-primary)] truncate">{t.title}</span>
@@ -341,7 +341,7 @@ export default function AdminPeoplePage() {
                     {/* Activity */}
                     <div>
                       <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Recent activity</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
                         {deptLogs.map((l) => (
                           <div key={l.id} className="text-[10px] bg-[var(--surface-soft)] p-2 rounded-xl">
                             <span className="font-semibold text-[var(--text-primary)] block">{l.action.replace(".", " ")}</span>

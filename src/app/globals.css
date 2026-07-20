@@ -1091,3 +1091,13 @@ html[data-theme="light"] .theme-toggle-premium .toggle-knob {
 .chips-inner-input::placeholder {
   color: var(--text-tertiary);
 }
+
+/* Hide scrollbars globally on scrollable containers */
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Safari and Chrome */
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
