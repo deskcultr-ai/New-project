@@ -72,7 +72,7 @@ type CheckboxProps = InputHTMLAttributes<HTMLInputElement> & { label?: ReactNode
 
 export function Checkbox({ label, className, ...props }: CheckboxProps) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+    <label className="inline-flex cursor-pointer items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
       <input type="checkbox" className={cn("h-4 w-4 rounded border-slate-300 accent-primary", className)} {...props} />
       {label}
     </label>
@@ -83,7 +83,7 @@ type RadioProps = InputHTMLAttributes<HTMLInputElement> & { label?: ReactNode };
 
 export function Radio({ label, className, ...props }: RadioProps) {
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+    <label className="inline-flex cursor-pointer items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
       <input type="radio" className={cn("h-4 w-4 border-slate-300 accent-primary", className)} {...props} />
       {label}
     </label>

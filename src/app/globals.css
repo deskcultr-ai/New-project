@@ -564,6 +564,85 @@ html[data-theme="light"] {
   --foreground: #1e1b4b;
 }
 
+/* ============================================================
+   Form element colour-scheme — tells the BROWSER which palette
+   to use when rendering native widgets (option list popup,
+   scrollbars, autofill overlay, date-pickers …).
+   Without this the OS always shows a light dropdown even when
+   the rest of the page is dark.
+   ============================================================ */
+
+/* Dark theme — native widgets go dark */
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  color-scheme: dark;
+}
+
+/* Light theme — native widgets stay light */
+html[data-theme="light"] input,
+html[data-theme="light"] select,
+html[data-theme="light"] textarea {
+  color-scheme: light;
+}
+
+/* Default (no explicit data-theme = dark by default) */
+html input, html select, html textarea {
+  color-scheme: dark;
+}
+
+/* ── <option> element colours ─────────────────────────────── */
+/* Dark theme options */
+html[data-theme="dark"] option,
+html option {
+  background-color: #2a1f4a;
+  color: #ffffff;
+}
+html[data-theme="dark"] option:checked,
+html option:checked {
+  background-color: #5b21b6;
+  color: #ffffff;
+}
+html[data-theme="dark"] option:hover,
+html option:hover {
+  background-color: #3b2a6b;
+}
+
+/* Light theme options */
+html[data-theme="light"] option {
+  background-color: #ffffff;
+  color: #1e1b4b;
+}
+html[data-theme="light"] option:checked {
+  background-color: #ede9fe;
+  color: #4c1d95;
+}
+html[data-theme="light"] option:hover {
+  background-color: #f5f3ff;
+}
+
+/* ── Autofill overlay fix ────────────────────────────────── */
+html[data-theme="dark"] input:-webkit-autofill,
+html[data-theme="dark"] input:-webkit-autofill:hover,
+html[data-theme="dark"] input:-webkit-autofill:focus,
+html input:-webkit-autofill,
+html input:-webkit-autofill:hover,
+html input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #2a1f4a inset !important;
+  box-shadow: 0 0 0 1000px #2a1f4a inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff;
+}
+
+html[data-theme="light"] input:-webkit-autofill,
+html[data-theme="light"] input:-webkit-autofill:hover,
+html[data-theme="light"] input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #f5f3ff inset !important;
+  box-shadow: 0 0 0 1000px #f5f3ff inset !important;
+  -webkit-text-fill-color: #1e1b4b !important;
+  caret-color: #1e1b4b;
+}
+
 /* Apply Liquid Gradient Background globally */
 body {
   background:
