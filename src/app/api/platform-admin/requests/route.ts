@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
 import { getBearerUser, isPlatformOwnerEmail } from "@/lib/auth-server";
 import { envValue, appOrigin } from "@/lib/env";
-import { generateInviteToken, hashInviteToken, inviteExpiresAt } from "@/lib/invite-token";
-import { sendInviteEmail } from "@/lib/invite-email";
 
 async function requirePlatformOwner(request: Request) {
   const bearer = await getBearerUser(request);
@@ -87,29 +85,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: orgError?.message ?? "Could not create the organization." }, { status: 400 });
   }
 
-  const rawToken = generateInviteToken();
-  const tokenHash = await hashInviteToken(rawToken);
-
-  const { error: inviteError } = await admin.from("invites").insert({
-    organization_id: org.id,
-    department_id: null,
-    role: "super_admin",
-    email: orgRequest.work_email,
-    token_hash: tokenHash,
-    invited_by: null,
-    expires_at: inviteExpiresAt("super_admin"),
-  });
-
-  if (inviteError) {
-    return NextResponse.json({ error: inviteError.message }, { status: 400 });
-  }
-
-  const link = `${appOrigin(request)}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-  const emailResult = await sendInviteEmail({
-    to: orgRequest.work_email,
-    orgName: org.name,
-    role: "super_admin",
-    link,
+  // Supabase Auth's native invite: creates the auth.users row immediately
+  // (the on_auth_user_created trigger creates the profile + claims
+  // super_admin_id right away, no separate redemption step needed) and
+  // sends the "Invite user" email template through whatever SMTP is
+  // configured in the Supabase dashboard.
+  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(orgRequest.work_email, {
+    data: { invite_role: "super_admin", organization_id: org.id },
+    redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
   });
 
   const { error: updateError } = await admin
@@ -121,5 +104,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: updateError.message }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, emailSent: emailResult.ok, emailError: emailResult.ok ? undefined : emailResult.error });
+  return NextResponse.json({
+    ok: true,
+    emailSent: !inviteError,
+    emailError: inviteError ? inviteError.message : undefined,
+  });
 }

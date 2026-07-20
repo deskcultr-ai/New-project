@@ -20,6 +20,6 @@
     // Public by nature (ships in the client bundle) -- it's only a UX
     // shortcut. The real gate is the server-only PLATFORM_OWNER_EMAILS
     // secret, checked independently in /api/platform-admin/requests.
-    "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS": "bellelingeries.ai@gmail.com"
+    "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS": "deskcultr@gmail.com"
   }
 }

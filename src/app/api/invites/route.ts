@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
 import { getBearerUser } from "@/lib/auth-server";
 import { appOrigin } from "@/lib/env";
-import { generateInviteToken, hashInviteToken, inviteExpiresAt } from "@/lib/invite-token";
-import { sendInviteEmail } from "@/lib/invite-email";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -13,18 +11,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
 
-  // RLS ("org admins can read relevant invites") already scopes this to
-  // exactly what the caller is allowed to see.
-  const { data, error } = await bearer.userClient
-    .from("invites")
-    .select("id, email, role, department_id, expires_at, accepted_at, revoked_at, created_at")
-    .order("created_at", { ascending: false });
+  // org_people_status() is SECURITY DEFINER (it needs to read auth.users,
+  // which isn't exposed over PostgREST) but scopes its own results to
+  // exactly what the caller's role/department is allowed to see.
+  const { data, error } = await bearer.userClient.rpc("org_people_status");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  return NextResponse.json({ invites: data });
+  return NextResponse.json({ people: data });
 }
 
 export async function POST(request: Request) {
@@ -78,7 +74,7 @@ export async function POST(request: Request) {
   // (RLS-respecting client -- departments are only readable within one's own org).
   const { data: department, error: deptError } = await bearer.userClient
     .from("departments")
-    .select("id, name, organization_id")
+    .select("id, organization_id")
     .eq("id", departmentId)
     .maybeSingle();
 
@@ -88,39 +84,14 @@ export async function POST(request: Request) {
 
   const admin = await getSupabaseAdmin();
 
-  const { data: org, error: orgError } = await admin
-    .from("organizations")
-    .select("id, name")
-    .eq("id", callerProfile.organization_id)
-    .single();
-
-  if (orgError || !org) {
-    return NextResponse.json({ error: "Could not resolve your organization." }, { status: 400 });
-  }
-
-  const rawToken = generateInviteToken();
-  const tokenHash = await hashInviteToken(rawToken);
-
-  const { error: inviteError } = await admin.from("invites").insert({
-    organization_id: callerProfile.organization_id,
-    department_id: department.id,
-    role,
-    email,
-    token_hash: tokenHash,
-    invited_by: callerProfile.id,
-    expires_at: inviteExpiresAt(role),
+  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
+    data: { invite_role: role, organization_id: callerProfile.organization_id, department_id: department.id },
+    redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
   });
 
   if (inviteError) {
     return NextResponse.json({ error: inviteError.message }, { status: 400 });
   }
 
-  const link = `${appOrigin(request)}/accept-invite?token=${encodeURIComponent(rawToken)}`;
-  const emailResult = await sendInviteEmail({ to: email, orgName: org.name, role, link });
-
-  return NextResponse.json({
-    ok: true,
-    emailSent: emailResult.ok,
-    emailError: emailResult.ok ? undefined : emailResult.error,
-  });
+  return NextResponse.json({ ok: true, emailSent: true });
 }

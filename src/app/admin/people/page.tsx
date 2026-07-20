@@ -8,32 +8,22 @@ import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 
 type Department = { id: string; name: string };
-type DirectoryPerson = { id: string; full_name: string | null; email: string; role: string; department_id: string | null };
-type Invite = {
-  id: string;
+type PersonStatus = {
+  profile_id: string;
   email: string;
+  full_name: string | null;
   role: "super_admin" | "admin" | "employee";
   department_id: string | null;
-  expires_at: string;
-  accepted_at: string | null;
-  revoked_at: string | null;
-  created_at: string;
+  invited_at: string | null;
+  confirmed_at: string | null;
 };
-
-function inviteStatus(invite: Invite): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
-  if (invite.accepted_at) return { label: "Accepted", tone: "success" };
-  if (invite.revoked_at) return { label: "Revoked", tone: "neutral" };
-  if (new Date(invite.expires_at).getTime() < Date.now()) return { label: "Expired", tone: "danger" };
-  return { label: "Pending", tone: "warning" };
-}
 
 export default function AdminPeoplePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [people, setPeople] = useState<DirectoryPerson[]>([]);
-  const [invites, setInvites] = useState<Invite[]>([]);
+  const [people, setPeople] = useState<PersonStatus[]>([]);
 
   const [newDeptName, setNewDeptName] = useState("");
   const [deptBusy, setDeptBusy] = useState(false);
@@ -57,12 +47,8 @@ export default function AdminPeoplePage() {
     }
     setProfile(me);
 
-    const [{ data: depts }, { data: directory }] = await Promise.all([
-      supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name"),
-      supabase.from("profiles").select("id, full_name, email, role, department_id").order("full_name"),
-    ]);
+    const { data: depts } = await supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name");
     setDepartments(depts ?? []);
-    setPeople((directory ?? []) as DirectoryPerson[]);
     if (me.role === "admin" && me.department_id) setInviteDeptId(me.department_id);
 
     const { data: sessionData } = await supabase.auth.getSession();
@@ -70,7 +56,7 @@ export default function AdminPeoplePage() {
     if (token) {
       const response = await fetch("/api/invites", { headers: { Authorization: `Bearer ${token}` } });
       const result = await response.json();
-      if (response.ok) setInvites(result.invites);
+      if (response.ok) setPeople(result.people);
     }
 
     setLoading(false);
@@ -145,7 +131,6 @@ export default function AdminPeoplePage() {
   }
 
   const deptName = (id: string | null) => departments.find((d) => d.id === id)?.name ?? "—";
-  const visiblePeople = profile.role === "super_admin" ? people : people.filter((p) => p.department_id === profile.department_id || p.id === profile.id);
 
   return (
     <AppShell profile={profile} title={profile.role === "super_admin" ? "Departments & People" : "Team"}>
@@ -176,8 +161,8 @@ export default function AdminPeoplePage() {
           </h2>
           <p className="mt-1 text-sm text-slate-500">
             {profile.role === "super_admin"
-              ? "Sends a single-use link to become the Admin of one department."
-              : `Sends a single-use link to join ${deptName(profile.department_id)}.`}
+              ? "Emails a link to become the Admin of one department."
+              : `Emails a link to join ${deptName(profile.department_id)}.`}
           </p>
           <form onSubmit={sendInvite} className="mt-4 flex flex-wrap gap-3">
             <Input
@@ -207,39 +192,21 @@ export default function AdminPeoplePage() {
         <Card>
           <h2 className="text-base font-bold text-slate-900">{profile.role === "super_admin" ? "Org directory" : "Your team"}</h2>
           <div className="mt-4 space-y-3">
-            {visiblePeople.length === 0 && <p className="text-sm text-slate-400">Nobody here yet.</p>}
-            {visiblePeople.map((person) => (
-              <div key={person.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+            {people.length === 0 && <p className="text-sm text-slate-400">Nobody here yet.</p>}
+            {people.map((person) => (
+              <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{person.full_name || person.email}</p>
                   <p className="text-xs text-slate-500">{person.email} · {deptName(person.department_id)}</p>
                 </div>
-                <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
-                  {person.role.replace("_", " ")}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
+                  <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
+                    {person.role.replace("_", " ")}
+                  </Badge>
+                </div>
               </div>
             ))}
-          </div>
-        </Card>
-
-        <Card>
-          <h2 className="text-base font-bold text-slate-900">Invites</h2>
-          <div className="mt-4 space-y-3">
-            {invites.length === 0 && <p className="text-sm text-slate-400">No invites yet.</p>}
-            {invites.map((invite) => {
-              const status = inviteStatus(invite);
-              return (
-                <div key={invite.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">{invite.email}</p>
-                    <p className="text-xs text-slate-500">
-                      {invite.role === "admin" ? "Admin" : "Employee"} · {deptName(invite.department_id)}
-                    </p>
-                  </div>
-                  <Badge tone={status.tone}>{status.label}</Badge>
-                </div>
-              );
-            })}
           </div>
         </Card>
       </div>

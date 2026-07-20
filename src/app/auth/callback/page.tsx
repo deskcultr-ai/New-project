@@ -53,6 +53,13 @@ function AuthCallbackContent() {
           setError(`Could not complete sign in: ${verifyError.message}. Please try again from the login page.`);
           return;
         }
+        // Native invite links land here with a profile already created
+        // (by the on_auth_user_created trigger) but no password set yet --
+        // send them to set one before routing into the app.
+        if (type === "invite") {
+          if (!cancelled) router.replace("/set-password");
+          return;
+        }
         await finish();
         return;
       }
