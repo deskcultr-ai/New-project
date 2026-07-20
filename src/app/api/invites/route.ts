@@ -30,15 +30,18 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { email?: string; role?: "admin" | "employee"; departmentId?: string }
+    | { email?: string; emails?: string[]; role?: "admin" | "employee"; departmentId?: string }
     | null;
 
-  const email = body?.email?.trim().toLowerCase();
+  // Support both single email and bulk emails array
+  const rawEmails = body?.emails ?? (body?.email ? [body.email] : []);
   const role = body?.role;
   const departmentId = body?.departmentId;
 
-  if (!email || !EMAIL_RE.test(email)) {
-    return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
+  const emails = rawEmails.map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e));
+
+  if (emails.length === 0) {
+    return NextResponse.json({ error: "Enter at least one valid email address." }, { status: 400 });
   }
   if (role !== "admin" && role !== "employee") {
     return NextResponse.json({ error: "role must be 'admin' or 'employee'." }, { status: 400 });
@@ -71,7 +74,6 @@ export async function POST(request: Request) {
   }
 
   // Confirm the target department actually belongs to the caller's org
-  // (RLS-respecting client -- departments are only readable within one's own org).
   const { data: department, error: deptError } = await bearer.userClient
     .from("departments")
     .select("id, organization_id")
@@ -84,14 +86,26 @@ export async function POST(request: Request) {
 
   const admin = await getSupabaseAdmin();
 
-  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { invite_role: role, organization_id: callerProfile.organization_id, department_id: department.id },
-    redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
+  // Send invites to all emails and collect results
+  const results = await Promise.all(
+    emails.map(async (email) => {
+      const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
+        data: { invite_role: role, organization_id: callerProfile.organization_id, department_id: department.id },
+        redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
+      });
+      return { email, ok: !inviteError, error: inviteError?.message };
+    })
+  );
+
+  const succeeded = results.filter((r) => r.ok).map((r) => r.email);
+  const failed = results.filter((r) => !r.ok);
+
+  return NextResponse.json({
+    ok: succeeded.length > 0,
+    emailSent: succeeded.length > 0,
+    succeeded,
+    failed,
+    // Backwards compat for single invite
+    emailError: failed.length === 1 ? failed[0].error : undefined,
   });
-
-  if (inviteError) {
-    return NextResponse.json({ error: inviteError.message }, { status: 400 });
-  }
-
-  return NextResponse.json({ ok: true, emailSent: true });
 }

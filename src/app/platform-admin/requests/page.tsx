@@ -60,6 +60,9 @@ export default function PlatformAdminRequestsPage() {
 
   useEffect(() => {
     async function run() {
+      // Platform admin page always uses the dark theme since it's outside AppShell
+      const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") as "dark" | "light" | null : null;
+      document.documentElement.setAttribute("data-theme", savedTheme ?? "dark");
       await load();
     }
     run();

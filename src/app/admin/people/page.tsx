@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
+import { EmailChipsInput } from "@/components/email-chips-input";
 
 type Department = { id: string; name: string };
 type PersonStatus = {
@@ -35,7 +36,7 @@ export default function AdminPeoplePage() {
   const [deptBusy, setDeptBusy] = useState(false);
   const [deptError, setDeptError] = useState("");
 
-  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteDeptId, setInviteDeptId] = useState("");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
@@ -98,7 +99,7 @@ export default function AdminPeoplePage() {
 
   async function sendInvite(event: React.FormEvent) {
     event.preventDefault();
-    if (!profile || !inviteEmail.trim() || !inviteDeptId) return;
+    if (!profile || inviteEmails.length === 0 || !inviteDeptId) return;
     setInviteBusy(true);
     setInviteError("");
     setInviteNotice("");
@@ -114,18 +115,26 @@ export default function AdminPeoplePage() {
     const response = await fetch("/api/invites", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ email: inviteEmail.trim(), role, departmentId: inviteDeptId }),
+      body: JSON.stringify({ emails: inviteEmails, role, departmentId: inviteDeptId }),
     });
     const result = await response.json();
 
     setInviteBusy(false);
     if (!response.ok) {
-      setInviteError(result.error ?? "Could not send the invite.");
+      setInviteError(result.error ?? "Could not send the invites.");
       return;
     }
 
-    setInviteEmail("");
-    setInviteNotice(result.emailSent ? "Invite sent." : `Invite created, but the email failed to send: ${result.emailError}`);
+    const { succeeded = [], failed = [] } = result;
+    setInviteEmails([]);
+
+    if (succeeded.length > 0 && failed.length === 0) {
+      setInviteNotice(`✓ Invite${succeeded.length > 1 ? "s" : ""} sent to ${succeeded.join(", ")}`);
+    } else if (succeeded.length > 0 && failed.length > 0) {
+      setInviteNotice(`✓ Sent to ${succeeded.join(", ")}. Failed: ${failed.map((f: {email:string}) => f.email).join(", ")}`);
+    } else {
+      setInviteError(`Failed to send invites. ${result.emailError ?? ""}`);
+    }
     load();
   }
 
@@ -164,33 +173,34 @@ export default function AdminPeoplePage() {
 
         <Card>
           <h2 className="text-base font-bold text-[var(--text-primary)]">
-            Invite {profile.role === "super_admin" ? "an Admin" : "an Employee"}
+            Invite {profile.role === "super_admin" ? "Admins" : "Employees"}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {profile.role === "super_admin"
-              ? "Emails a link to become the Admin of one department."
-              : `Emails a link to join ${deptName(profile.department_id)}.`}
+              ? "Add email addresses and send invites to multiple admins at once."
+              : `Add email addresses and send invites to join ${deptName(profile.department_id)}.`}
           </p>
-          <form onSubmit={sendInvite} className="mt-4 flex flex-wrap gap-3">
-            <Input
-              type="email"
-              required
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="person@company.com"
-              className="min-w-[220px] flex-1"
+          <form onSubmit={sendInvite} className="mt-4 space-y-3">
+            <EmailChipsInput
+              emails={inviteEmails}
+              onChange={setInviteEmails}
+              placeholder={profile.role === "super_admin" ? "Add admin email addresses..." : "Add employee email addresses..."}
+              disabled={inviteBusy}
             />
-            {profile.role === "super_admin" ? (
-              <Select value={inviteDeptId} onChange={(e) => setInviteDeptId(e.target.value)} className="w-56">
-                <option value="">Select department</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </Select>
-            ) : null}
-            <Button type="submit" disabled={inviteBusy || !inviteEmail.trim() || !inviteDeptId}>
-              {inviteBusy ? "Sending..." : "Send invite"}
-            </Button>
+            <p className="text-xs text-[var(--text-tertiary)]">Type an email and press Enter, Tab, Space, or comma to add it. Paste multiple emails at once.</p>
+            <div className="flex flex-wrap gap-3 items-center">
+              {profile.role === "super_admin" ? (
+                <Select value={inviteDeptId} onChange={(e) => setInviteDeptId(e.target.value)} className="w-56">
+                  <option value="">Select department</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </Select>
+              ) : null}
+              <Button type="submit" disabled={inviteBusy || inviteEmails.length === 0 || !inviteDeptId}>
+                {inviteBusy ? `Sending ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}...` : `Send ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}`}
+              </Button>
+            </div>
           </form>
           {inviteError && <Alert tone="danger" className="mt-3">{inviteError}</Alert>}
           {inviteNotice && <Alert tone="success" className="mt-3">{inviteNotice}</Alert>}
