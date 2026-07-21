@@ -156,6 +156,34 @@ function NotificationBell({ profileId }: { profileId: string }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [panelPos, setPanelPos] = useState({ top: 0, right: 0 });
+
+  // The header's real height varies per page (some pass extra actions/a
+  // search bar), so a fixed CSS offset for the panel doesn't line up with
+  // where the bell actually is on every page. Anchor to the bell's real
+  // on-screen position instead -- the same approach GitHub's dropdowns use.
+  function positionPanel() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPanelPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
+  }
+
+  function toggleOpen() {
+    if (!open) positionPanel();
+    setOpen((value) => !value);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    positionPanel();
+    window.addEventListener("resize", positionPanel);
+    window.addEventListener("scroll", positionPanel, true);
+    return () => {
+      window.removeEventListener("resize", positionPanel);
+      window.removeEventListener("scroll", positionPanel, true);
+    };
+  }, [open]);
 
   // Browser popup notifications (Notification API) -- shows an OS-level
   // toast while this tab is open in the background, same behavior as any
@@ -238,8 +266,9 @@ function NotificationBell({ profileId }: { profileId: string }) {
   return (
     <div className="relative" ref={wrapperRef}>
       <button
+        ref={buttonRef}
         aria-label="Notifications"
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggleOpen}
         className="ping-btn glass-panel"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
@@ -255,7 +284,10 @@ function NotificationBell({ profileId }: { profileId: string }) {
           {/* fixed to the viewport, not the page flow -- can never push
               layout around regardless of any parent's positioning */}
           <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div className="fixed right-4 top-16 z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl">
+          <div
+            className="fixed z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl"
+            style={{ top: panelPos.top, right: panelPos.right }}
+          >
             <div className="border-b border-[var(--divider)] px-4 py-3">
               <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
             </div>
