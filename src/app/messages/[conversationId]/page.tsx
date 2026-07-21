@@ -144,6 +144,16 @@ export default function ConversationPage() {
           const row = { ...(payload.new as MessageRow), author: author ?? null };
           setMessages((current) => [...current, row]);
           loadTaskPreviews([row.body]);
+
+          // Without this, a message arriving while this conversation is
+          // already open would still leave it showing "unread" in the
+          // sidebar until the page was left and reopened.
+          const me = await getProfile();
+          if (me) {
+            await supabase
+              .from("conversation_reads")
+              .upsert({ conversation_id: params.conversationId, profile_id: me.id, last_read_at: new Date().toISOString() }, { onConflict: "conversation_id,profile_id" });
+          }
         }
       )
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, (payload) => {

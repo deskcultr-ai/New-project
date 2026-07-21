@@ -121,7 +121,26 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
           }
         });
 
+      // The conversation list + unread badges otherwise only ever loaded
+      // once on mount -- a new message anywhere, or a brand new DM someone
+      // else started, never showed up without a manual reload. Realtime
+      // already enforces RLS on these subscriptions, so an unfiltered
+      // listen only ever delivers rows this user can actually see.
+      const myProfile: Profile = me;
+      let reloadTimeout: ReturnType<typeof setTimeout> | null = null;
+      function scheduleReload() {
+        if (reloadTimeout) clearTimeout(reloadTimeout);
+        reloadTimeout = setTimeout(() => load(myProfile), 400);
+      }
+      const sidebarChannel = supabase
+        .channel(`messages-sidebar:${me.id}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, scheduleReload)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversations" }, scheduleReload)
+        .subscribe();
+
       return () => {
+        if (reloadTimeout) clearTimeout(reloadTimeout);
+        supabase.removeChannel(sidebarChannel);
         supabase.removeChannel(presenceChannel);
       };
     }
