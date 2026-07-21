@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -8,13 +8,34 @@ import { cn } from "@/lib/cn";
 import { displayName, type Profile } from "@/lib/session";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode };
+type NotificationType =
+  | "mention"
+  | "dm"
+  | "thread_reply"
+  | "task_assigned"
+  | "task_forward"
+  | "member_joined"
+  | "file_uploaded"
+  | "department_created";
 type NotificationItem = {
   id: string;
+  type: NotificationType;
   title: string;
   body: string | null;
   link: string | null;
   read_at: string | null;
   created_at: string;
+};
+
+const NOTIFICATION_ICON: Record<NotificationType, string> = {
+  mention: "💬",
+  dm: "✉️",
+  thread_reply: "↩️",
+  task_assigned: "✅",
+  task_forward: "🔁",
+  member_joined: "👋",
+  file_uploaded: "📎",
+  department_created: "🏢",
 };
 
 function icon(d: string) {
@@ -134,6 +155,18 @@ function NotificationBell({ profileId }: { profileId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Browser popup notifications (Notification API) -- shows an OS-level
+  // toast while this tab is open in the background, same behavior as any
+  // site you've granted notification permission to. Doesn't require the
+  // browser to be closed/open in advance -- just asks once.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +176,7 @@ function NotificationBell({ profileId }: { profileId: string }) {
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from("notifications")
-        .select("id, title, body, link, read_at, created_at")
+        .select("id, type, title, body, link, read_at, created_at")
         .eq("profile_id", profileId)
         .gte("created_at", twoHoursAgo)
         .order("created_at", { ascending: false })
@@ -158,7 +191,17 @@ function NotificationBell({ profileId }: { profileId: string }) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `profile_id=eq.${profileId}` },
         (payload) => {
-          setItems((current) => [payload.new as NotificationItem, ...current].slice(0, 30));
+          const item = payload.new as NotificationItem;
+          setItems((current) => [item, ...current].slice(0, 30));
+
+          if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") {
+            const popup = new Notification(item.title, { body: item.body ?? undefined, tag: item.id, icon: "/favicon.ico" });
+            popup.onclick = () => {
+              window.focus();
+              if (item.link) router.push(item.link);
+              popup.close();
+            };
+          }
         }
       )
       .subscribe();
@@ -167,7 +210,18 @@ function NotificationBell({ profileId }: { profileId: string }) {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [profileId]);
+  }, [profileId, router]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
 
   const unreadCount = items.filter((item) => !item.read_at).length;
 
@@ -182,7 +236,7 @@ function NotificationBell({ profileId }: { profileId: string }) {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={wrapperRef}>
       <button
         aria-label="Notifications"
         onClick={() => setOpen((value) => !value)}
@@ -197,31 +251,37 @@ function NotificationBell({ profileId }: { profileId: string }) {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[320px] max-w-[86vw] overflow-hidden glass-panel">
-          <div className="border-b border-[var(--divider)] px-4 py-3">
-            <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
+        <>
+          {/* fixed to the viewport, not the page flow -- can never push
+              layout around regardless of any parent's positioning */}
+          <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
+          <div className="fixed right-4 top-16 z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl">
+            <div className="border-b border-[var(--divider)] px-4 py-3">
+              <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
+            </div>
+            <div className="max-h-[320px] overflow-y-auto p-2">
+              {items.length > 0 ? (
+                items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openNotification(item)}
+                    className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
+                  >
+                    <span className="mt-0.5 shrink-0 text-base leading-none">{NOTIFICATION_ICON[item.type] ?? "🔔"}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
+                      {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
+                    </span>
+                    {!item.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />}
+                  </button>
+                ))
+              ) : (
+                <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
+              )}
+            </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto p-2">
-            {items.length > 0 ? (
-              items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => openNotification(item)}
-                  className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
-                >
-                  <span className={cn("mt-1 h-2.5 w-2.5 shrink-0 rounded-full", item.read_at ? "bg-slate-500" : "bg-red-500")} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
-                    {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
-                  </span>
-                </button>
-              ))
-            ) : (
-              <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
-            )}
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
