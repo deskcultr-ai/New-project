@@ -10,8 +10,13 @@ import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, type Task } from "@/lib/ta
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [tasks, setTasks] = useState<Task[]>([]);
 
   useEffect(() => {
@@ -26,6 +31,7 @@ export default function DashboardPage() {
         return;
       }
       setProfile(me);
+      sessionStorage.setItem("user_profile", JSON.stringify(me));
 
       const { data } = await supabase
         .from("tasks")
@@ -34,12 +40,11 @@ export default function DashboardPage() {
         .order("due_date", { ascending: true, nullsFirst: false })
         .order("priority", { ascending: false });
       setTasks((data ?? []) as Task[]);
-      setLoading(false);
     }
     load();
   }, [router]);
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />

@@ -13,6 +13,7 @@ type PersonStatus = {
   profile_id: string;
   email: string;
   full_name: string | null;
+  username: string | null;
   role: "super_admin" | "admin" | "employee";
   department_id: string | null;
   invited_at: string | null;
@@ -31,9 +32,14 @@ const ACTION_LABEL: Record<string, string> = {
 export default function DepartmentDetailPage() {
   const params = useParams<{ departmentId: string }>();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    if (typeof window !== "undefined") {
+      const cached = sessionStorage.getItem("user_profile");
+      return cached ? JSON.parse(cached) : null;
+    }
+    return null;
+  });
   const [department, setDepartment] = useState<Department | null>(null);
   const [members, setMembers] = useState<PersonStatus[]>([]);
   const [tasks, setTasks] = useState<DeptTask[]>([]);
@@ -50,6 +56,7 @@ export default function DepartmentDetailPage() {
       return;
     }
     setProfile(me);
+    sessionStorage.setItem("user_profile", JSON.stringify(me));
 
     const { data: dept, error: deptErr } = await supabase
       .from("departments")
@@ -58,7 +65,6 @@ export default function DepartmentDetailPage() {
       .maybeSingle();
     if (deptErr || !dept) {
       setNotFound(true);
-      setLoading(false);
       return;
     }
     setDepartment(dept as Department);
@@ -72,14 +78,13 @@ export default function DepartmentDetailPage() {
     setMembers(((peopleRows ?? []) as PersonStatus[]).filter((p) => p.department_id === params.departmentId));
     setTasks((taskRows ?? []) as DeptTask[]);
     setLogs((logRows ?? []) as unknown as ActivityLog[]);
-    setLoading(false);
   }, [params.departmentId, router]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  if (loading || !profile) {
+  if (!profile) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
         <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
@@ -87,13 +92,21 @@ export default function DepartmentDetailPage() {
     );
   }
 
-  if (notFound || !department) {
+  if (notFound) {
     return (
       <AppShell profile={profile} title="Department not found">
         <Card className="text-center text-sm text-[var(--text-tertiary)]">
           This department doesn&apos;t exist, or you don&apos;t have access to it.
         </Card>
       </AppShell>
+    );
+  }
+
+  if (!department) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-slate-50 text-slate-500">
+        <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-indigo-600 border-t-transparent" />
+      </main>
     );
   }
 
@@ -124,8 +137,8 @@ export default function DepartmentDetailPage() {
             {members.map((person) => (
               <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--divider)] px-3 py-2.5">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{person.full_name || person.email}</p>
-                  <p className="truncate text-xs text-[var(--text-secondary)]">{person.email}</p>
+                  <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{person.full_name || (person.username ? `@${person.username}` : person.email)}</p>
+                  <p className="truncate text-xs text-[var(--text-secondary)]">{person.username ? `@${person.username}` : person.email}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>

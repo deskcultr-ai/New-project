@@ -13,11 +13,16 @@ type PersonStatus = {
   profile_id: string;
   email: string;
   full_name: string | null;
+  username: string | null;
   role: "super_admin" | "admin" | "employee";
   department_id: string | null;
   invited_at: string | null;
   confirmed_at: string | null;
 };
+
+function personSubtitle(person: PersonStatus): string {
+  return person.username ? `@${person.username}` : person.email;
+}
 
 export default function AdminPeoplePage() {
   const router = useRouter();
@@ -311,8 +316,8 @@ export default function AdminPeoplePage() {
                     return visiblePeople.map((person) => (
                       <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
                         <div>
-                          <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || person.email}</p>
-                          <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{person.email} · {deptName(person.department_id)}</p>
+                          <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || personSubtitle(person)}</p>
+                          <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{personSubtitle(person)} · {deptName(person.department_id)}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>

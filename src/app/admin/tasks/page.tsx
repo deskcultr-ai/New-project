@@ -65,7 +65,7 @@ export default function AdminTasksPage() {
 
     const [{ data: depts }, { data: people }, { data: taskRows }] = await Promise.all([
       supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name"),
-      supabase.from("profiles").select("id, full_name, email, role").order("full_name"),
+      supabase.from("profiles").select("id, full_name, username, email, role").order("full_name"),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
     ]);
 
@@ -154,10 +154,15 @@ export default function AdminTasksPage() {
   }
 
   const deptName = (id: string) => departments.find((d) => d.id === id)?.name ?? "—";
-  const personName = (id: string | null) => (id ? assignees.find((p) => p.id === id)?.full_name || assignees.find((p) => p.id === id)?.email || "—" : "Unassigned");
+  const personName = (id: string | null) => {
+    if (!id) return "Unassigned";
+    const p = assignees.find((a) => a.id === id);
+    if (!p) return "—";
+    return p.username ? `@${p.username}` : p.full_name || p.email;
+  };
 
   return (
-    <AppShell profile={profile} title="Tasks" subtitle={profile.role === "super_admin" ? "Org-wide board" : "Your department's board"}>
+    <AppShell profile={profile} title="Tasks" subtitle="Org-wide board">
       <div className="space-y-8">
         <Card>
           <h2 className="text-base font-bold text-[var(--text-primary)]">New task</h2>
@@ -182,22 +187,15 @@ export default function AdminTasksPage() {
               />
             </label>
             <div className="grid gap-4 sm:grid-cols-3">
-              {profile.role === "super_admin" ? (
-                <label className="block text-sm font-semibold text-[var(--text-secondary)]">
-                  Department
-                  <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="mt-2">
-                    <option value="">Select department</option>
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </Select>
-                </label>
-              ) : (
-                <div className="text-sm font-semibold text-[var(--text-secondary)]">
-                  Department
-                  <p className="mt-2 rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3.5 py-2.5 text-sm text-[var(--text-secondary)]">{deptName(departmentId)}</p>
-                </div>
-              )}
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                Department
+                <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="mt-2">
+                  <option value="">Select department</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </Select>
+              </label>
               <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Priority
                 <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)} className="mt-2">
@@ -211,7 +209,7 @@ export default function AdminTasksPage() {
                 <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="mt-2">
                   <option value="">Unassigned</option>
                   {assignees.map((p) => (
-                    <option key={p.id} value={p.id}>{p.full_name || p.email} ({p.role})</option>
+                    <option key={p.id} value={p.id}>{p.username ? `@${p.username}` : p.full_name || p.email} ({p.role})</option>
                   ))}
                 </Select>
               </label>

@@ -31,6 +31,8 @@ export default function DepartmentDrivePage() {
   const [resources, setResources] = useState<ResourceFile[]>([]);
   const [resourceBusy, setResourceBusy] = useState(false);
   const [resourceError, setResourceError] = useState("");
+  const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
@@ -120,6 +122,34 @@ export default function DepartmentDrivePage() {
     loadResources(profile.organization_id);
   }
 
+  function toggleResourceSelected(name: string) {
+    setSelectedResources((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  async function deleteSelectedResources() {
+    if (!profile || selectedResources.size === 0) return;
+    if (!window.confirm(`Delete ${selectedResources.size} file${selectedResources.size > 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setDeleteBusy(true);
+    setResourceError("");
+
+    const prefix = RESOURCES_PREFIX(profile.organization_id, params.departmentId);
+    const paths = Array.from(selectedResources).map((name) => `${prefix}/${name}`);
+    const { error } = await supabase.storage.from("org-drive").remove(paths);
+
+    setDeleteBusy(false);
+    if (error) {
+      setResourceError(error.message);
+      return;
+    }
+    setSelectedResources(new Set());
+    loadResources(profile.organization_id);
+  }
+
   if (!profile) {
     return (
       <main className="grid min-h-screen place-items-center bg-slate-900 text-indigo-400">
@@ -140,28 +170,48 @@ export default function DepartmentDrivePage() {
     <AppShell profile={profile} title={department.name} subtitle="Department Drive">
       <div className="space-y-8">
         <Card>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <h2 className="text-base font-bold text-[var(--text-primary)]">Resources</h2>
-            {canWriteResources && (
-              <label className="cursor-pointer text-xs font-bold text-primary">
-                {resourceBusy ? "Uploading..." : "+ Upload"}
-                <input type="file" onChange={uploadResource} disabled={resourceBusy} className="hidden" />
-              </label>
-            )}
+            <div className="flex items-center gap-3">
+              {canWriteResources && selectedResources.size > 0 && (
+                <button
+                  type="button"
+                  onClick={deleteSelectedResources}
+                  disabled={deleteBusy}
+                  className="text-xs font-bold text-red-500 hover:text-red-400 disabled:opacity-50 bg-transparent border-0 cursor-pointer"
+                >
+                  {deleteBusy ? "Deleting..." : `Delete (${selectedResources.size})`}
+                </button>
+              )}
+              {canWriteResources && (
+                <label className="cursor-pointer text-xs font-bold text-primary">
+                  {resourceBusy ? "Uploading..." : "+ Upload"}
+                  <input type="file" onChange={uploadResource} disabled={resourceBusy} className="hidden" />
+                </label>
+              )}
+            </div>
           </div>
           <p className="mt-1 text-xs text-[var(--text-secondary)]">Templates, SOPs, and reference docs for this department.</p>
           {resourceError && <Alert tone="danger" className="mt-3">{resourceError}</Alert>}
           <div className="mt-4 space-y-2">
             {resources.map((file) => (
-              <button
+              <div
                 key={file.name}
-                type="button"
-                onClick={() => downloadResource(file)}
-                className="flex w-full items-center justify-between rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-left text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)] bg-transparent cursor-pointer"
+                className="flex w-full items-center gap-3 rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)]"
               >
-                <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
-                <span className="text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
-              </button>
+                {canWriteResources && (
+                  <input
+                    type="checkbox"
+                    checked={selectedResources.has(file.name)}
+                    onChange={() => toggleResourceSelected(file.name)}
+                    className="h-4 w-4 shrink-0 rounded accent-primary"
+                  />
+                )}
+                <button type="button" onClick={() => downloadResource(file)} className="flex min-w-0 flex-1 items-center justify-between gap-2 bg-transparent border-0 p-0 text-left cursor-pointer">
+                  <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
+                  <span className="shrink-0 text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
+                </button>
+              </div>
             ))}
             {resources.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No resources yet.</p>}
           </div>

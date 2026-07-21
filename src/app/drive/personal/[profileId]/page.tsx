@@ -25,6 +25,8 @@ export default function PersonalDrivePage() {
   const [files, setFiles] = useState<PersonalFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(async (me: Profile) => {
     const { data, error: listError } = await supabase.storage.from("org-drive").list(PERSONAL_FOLDER_PREFIX(me.organization_id, params.profileId));
@@ -75,6 +77,34 @@ export default function PersonalDrivePage() {
     load(profile);
   }
 
+  function toggleSelected(name: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  async function deleteSelected() {
+    if (!profile || selected.size === 0) return;
+    if (!window.confirm(`Delete ${selected.size} file${selected.size > 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setDeleteBusy(true);
+    setError("");
+
+    const prefix = PERSONAL_FOLDER_PREFIX(profile.organization_id, params.profileId);
+    const paths = Array.from(selected).map((name) => `${prefix}/${name}`);
+    const { error: removeError } = await supabase.storage.from("org-drive").remove(paths);
+
+    setDeleteBusy(false);
+    if (removeError) {
+      setError(removeError.message);
+      return;
+    }
+    setSelected(new Set());
+    load(profile);
+  }
+
   const preview = useFilePreview();
 
   async function downloadFile(file: PersonalFile) {
@@ -97,25 +127,43 @@ export default function PersonalDrivePage() {
   return (
     <AppShell profile={profile} title={isOwn ? "My Personal Folder" : "Personal Folder"}>
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-[var(--text-secondary)]">Private working space. {isOwn ? "Only you" : "You"} and org admins can see this.</p>
-          <label className="cursor-pointer text-xs font-bold text-primary">
-            {busy ? "Uploading..." : "+ Upload"}
-            <input type="file" onChange={uploadFile} disabled={busy} className="hidden" />
-          </label>
+          <div className="flex shrink-0 items-center gap-3">
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={deleteSelected}
+                disabled={deleteBusy}
+                className="text-xs font-bold text-red-500 hover:text-red-400 disabled:opacity-50 bg-transparent border-0 cursor-pointer"
+              >
+                {deleteBusy ? "Deleting..." : `Delete (${selected.size})`}
+              </button>
+            )}
+            <label className="cursor-pointer text-xs font-bold text-primary">
+              {busy ? "Uploading..." : "+ Upload"}
+              <input type="file" onChange={uploadFile} disabled={busy} className="hidden" />
+            </label>
+          </div>
         </div>
         {error && <Alert tone="danger" className="mt-3">{error}</Alert>}
         <div className="mt-4 space-y-2">
           {files.map((file) => (
-            <button
+            <div
               key={file.name}
-              type="button"
-              onClick={() => downloadFile(file)}
-              className="flex w-full items-center justify-between rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-left text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)] bg-transparent cursor-pointer"
+              className="flex w-full items-center gap-3 rounded-xl border border-[var(--glass-border-soft)] px-3 py-2 text-sm hover:border-[#8b5cf6]/40 hover:bg-[var(--surface-soft)]"
             >
-              <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
-              <span className="text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
-            </button>
+              <input
+                type="checkbox"
+                checked={selected.has(file.name)}
+                onChange={() => toggleSelected(file.name)}
+                className="h-4 w-4 shrink-0 rounded accent-primary"
+              />
+              <button type="button" onClick={() => downloadFile(file)} className="flex min-w-0 flex-1 items-center justify-between gap-2 bg-transparent border-0 p-0 text-left cursor-pointer">
+                <span className="truncate font-semibold text-[var(--text-primary)]">{file.name}</span>
+                <span className="shrink-0 text-xs text-[var(--text-tertiary)]">{formatBytes(file.size)}</span>
+              </button>
+            </div>
           ))}
           {files.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No files yet.</p>}
         </div>

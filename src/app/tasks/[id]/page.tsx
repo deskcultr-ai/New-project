@@ -9,7 +9,7 @@ import { Button, Card, Select, Badge, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
 
-type PersonRef = { id: string; full_name: string | null; email: string } | null;
+type PersonRef = { id: string; full_name: string | null; username?: string | null; email: string } | null;
 type TaskDetail = {
   id: string;
   organization_id: string;
@@ -36,7 +36,7 @@ type Attachment = {
   created_at: string;
   uploader: PersonRef;
 };
-type DirectoryPerson = { id: string; full_name: string | null; email: string; role: string };
+type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string };
 
 function groupAttachmentVersions(attachments: Attachment[]) {
   const byName = new Map<string, Attachment[]>();
@@ -102,18 +102,18 @@ export default function TaskDetailPage() {
       supabase
         .from("tasks")
         .select(
-          "id, organization_id, department_id, title, description, status, is_blocked, priority, due_date, assigned_to, created_by, department:departments(name), assignee:profiles!tasks_assigned_to_fkey(id,full_name,email), creator:profiles!tasks_created_by_fkey(id,full_name,email)"
+          "id, organization_id, department_id, title, description, status, is_blocked, priority, due_date, assigned_to, created_by, department:departments(name), assignee:profiles!tasks_assigned_to_fkey(id,full_name,username,email), creator:profiles!tasks_created_by_fkey(id,full_name,username,email)"
         )
         .eq("id", params.id)
         .maybeSingle(),
       supabase
         .from("task_comments")
-        .select("id, body, created_at, author:profiles(id,full_name,email)")
+        .select("id, body, created_at, author:profiles(id,full_name,username,email)")
         .eq("task_id", params.id)
         .order("created_at", { ascending: true }),
       supabase
         .from("task_attachments")
-        .select("id, storage_path, file_name, file_size, content_type, created_at, uploader:profiles(id,full_name,email)")
+        .select("id, storage_path, file_name, file_size, content_type, created_at, uploader:profiles(id,full_name,username,email)")
         .eq("task_id", params.id)
         .order("created_at", { ascending: true }),
     ]);
@@ -280,7 +280,7 @@ export default function TaskDetailPage() {
     );
   }
 
-  const personLabel = (person: PersonRef) => (person ? person.full_name || person.email : "Unassigned");
+  const personLabel = (person: PersonRef) => (person ? (person.username ? `@${person.username}` : person.full_name || person.email) : "Unassigned");
 
   return (
     <AppShell profile={profile} title={task.title} subtitle={task.department?.name ?? undefined}>
@@ -339,7 +339,7 @@ export default function TaskDetailPage() {
                     <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="mt-2">
                       <option value="">Unassigned</option>
                       {assignees.map((p) => (
-                        <option key={p.id} value={p.id}>{p.full_name || p.email} ({p.role})</option>
+                        <option key={p.id} value={p.id}>{p.username ? `@${p.username}` : p.full_name || p.email} ({p.role})</option>
                       ))}
                     </Select>
                   </label>
@@ -377,7 +377,7 @@ export default function TaskDetailPage() {
                     <label className="block text-sm font-semibold text-[var(--text-secondary)] mb-1.5">Forward to (search by name or @username)</label>
                     <input
                       type="text"
-                      value={forwardTo ? (forwardTo.full_name || forwardTo.email) : forwardQuery}
+                      value={forwardTo ? (forwardTo.username ? `@${forwardTo.username}` : forwardTo.full_name || forwardTo.email) : forwardQuery}
                       onChange={(e) => { setForwardQuery(e.target.value); setForwardTo(null); }}
                       placeholder="Search teammate..."
                       className="h-11 w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] px-3.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] placeholder:text-[var(--text-tertiary)]"
@@ -389,9 +389,9 @@ export default function TaskDetailPage() {
                           ((p.full_name?.toLowerCase().includes(forwardQuery.toLowerCase())) ||
                           p.email.toLowerCase().includes(forwardQuery.toLowerCase()))
                         ).map((p) => (
-                          <button key={p.id} type="button" onClick={() => { setForwardTo(p); setForwardQuery(p.full_name || p.email); }}
+                          <button key={p.id} type="button" onClick={() => { setForwardTo(p); setForwardQuery(p.username ? `@${p.username}` : p.full_name || p.email); }}
                             className="flex w-full items-center border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] cursor-pointer">
-                            {p.full_name || p.email}
+                            {p.username ? `@${p.username}` : p.full_name || p.email}
                           </button>
                         ))}
                       </div>

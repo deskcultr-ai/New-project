@@ -10,12 +10,18 @@ import { Button, Card, Input, Alert } from "@/components/ui";
 const MAX_BIO = 280;
 const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 
+function cachedProfile(): Profile | null {
+  if (typeof window === "undefined") return null;
+  const cached = sessionStorage.getItem("user_profile");
+  return cached ? JSON.parse(cached) : null;
+}
+
 export default function ProfileSettingsPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [username, setUsername] = useState("");
-  const [bio, setBio] = useState("");
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(cachedProfile);
+  const [username, setUsername] = useState(() => cachedProfile()?.username ?? "");
+  const [bio, setBio] = useState(() => cachedProfile()?.bio ?? "");
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(() => cachedProfile()?.avatar_url ?? null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,6 +34,7 @@ export default function ProfileSettingsPage() {
       const me = await getProfile();
       if (!me) { router.replace("/login"); return; }
       setProfile(me);
+      sessionStorage.setItem("user_profile", JSON.stringify(me));
       setUsername(me.username ?? "");
       setBio(me.bio ?? "");
       if (me.avatar_url) setAvatarPreview(me.avatar_url);
@@ -66,17 +73,20 @@ export default function ProfileSettingsPage() {
     try {
       let avatarUrl = profile.avatar_url;
 
-      // Upload avatar if changed
+      // Upload avatar if changed. Uses the dedicated public "avatars" bucket
+      // (org-drive is private, so getPublicUrl() against it would produce a
+      // dead link -- avatars need to render directly in <img> tags all over
+      // the app without signed-URL round-trips or expiry).
       if (avatarFile) {
         const ext = avatarFile.name.split(".").pop() ?? "jpg";
-        const path = `${profile.organization_id}/avatars/${profile.id}/avatar.${ext}`;
+        const path = `${profile.id}/avatar.${ext}`;
         const { error: uploadErr } = await supabase.storage
-          .from("org-drive")
+          .from("avatars")
           .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type });
         if (uploadErr) throw new Error(`Avatar upload failed: ${uploadErr.message}`);
 
-        const { data: urlData } = supabase.storage.from("org-drive").getPublicUrl(path);
-        avatarUrl = urlData.publicUrl;
+        const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
+        avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;
       }
 
       // Save profile fields
