@@ -254,8 +254,15 @@ function NotificationBell({ profileId }: { profileId: string }) {
         setOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    // Defer attaching the listener to the next tick. Without this, the
+    // mousedown that just opened the panel (still in-flight the moment
+    // this effect runs) can be picked up by the SAME listener and close it
+    // right back -- the classic "dropdown closes itself immediately" bug.
+    const timer = setTimeout(() => document.addEventListener("mousedown", handleClickOutside), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [open]);
 
   const unreadCount = items.filter((item) => !item.read_at).length;
