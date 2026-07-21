@@ -8,6 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Card, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { formatBytes, PERSONAL_FOLDER_PREFIX } from "@/lib/drive";
+import { uploadFileWithRetry } from "@/lib/storage-upload";
 
 type PersonalFile = { name: string; size: number; contentType: string | null };
 
@@ -68,7 +69,7 @@ export default function PersonalDrivePage() {
     setError("");
 
     const path = `${PERSONAL_FOLDER_PREFIX(profile.organization_id, params.profileId)}/${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("org-drive").upload(path, file, { upsert: true });
+    const { error: uploadError } = await uploadFileWithRetry("org-drive", path, file, { upsert: true });
     setBusy(false);
     if (uploadError) {
       setError(uploadError.message);

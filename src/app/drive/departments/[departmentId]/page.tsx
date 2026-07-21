@@ -8,6 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Card, Button, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { formatBytes, RESOURCES_PREFIX } from "@/lib/drive";
+import { uploadFileWithRetry } from "@/lib/storage-upload";
 
 type Department = { id: string; name: string };
 type Task = { id: string; title: string; status: string };
@@ -113,7 +114,7 @@ export default function DepartmentDrivePage() {
     setResourceError("");
 
     const path = `${RESOURCES_PREFIX(profile.organization_id, params.departmentId)}/${file.name}`;
-    const { error } = await supabase.storage.from("org-drive").upload(path, file, { upsert: true });
+    const { error } = await uploadFileWithRetry("org-drive", path, file, { upsert: true });
     setResourceBusy(false);
     if (error) {
       setResourceError(error.message);

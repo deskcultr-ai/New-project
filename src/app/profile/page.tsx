@@ -84,9 +84,10 @@ export default function ProfileSettingsPage() {
         // the live session if it's ever stale -- read the id straight off
         // the current session instead of trusting cached state, so the path
         // can never mismatch what RLS checks against.
-        const { data: authData } = await supabase.auth.getUser();
-        const uid = authData.user?.id;
-        if (!uid) throw new Error("Your session has expired. Please sign out and sign in again.");
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData.session;
+        if (!session) throw new Error("Your session has expired. Please sign out and sign in again.");
+        const uid = session.user.id;
 
         const ext = avatarFile.name.split(".").pop() ?? "jpg";
         const path = `${uid}/avatar.${ext}`;
@@ -109,7 +110,21 @@ export default function ProfileSettingsPage() {
           }
         }
 
-        if (uploadErr) throw new Error(`Avatar upload failed: ${uploadErr.message}. Try signing out and back in.`);
+        if (uploadErr) {
+          // Diagnostic dump -- surfaced directly in the on-screen error so
+          // we can see exactly what the browser's session looked like at
+          // the moment of failure, instead of guessing blind. Decodes the
+          // JWT payload locally (no verification needed, just inspection).
+          let jwtInfo = "no access token";
+          try {
+            const payload = JSON.parse(atob(session.access_token.split(".")[1]));
+            const expiresInSec = payload.exp - Math.floor(Date.now() / 1000);
+            jwtInfo = `sub=${payload.sub} role=${payload.role} anon=${payload.is_anonymous} exp_in=${expiresInSec}s path_uid=${uid}`;
+          } catch {
+            jwtInfo = "could not decode access token";
+          }
+          throw new Error(`Avatar upload failed: ${uploadErr.message} [status=${(uploadErr as { statusCode?: string }).statusCode ?? "?"}] [${jwtInfo}]`);
+        }
 
         const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
         avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;

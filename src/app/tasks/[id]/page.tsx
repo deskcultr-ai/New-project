@@ -7,6 +7,7 @@ import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Select, Badge, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
+import { uploadFileWithRetry } from "@/lib/storage-upload";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
 
 type PersonRef = { id: string; full_name: string | null; username?: string | null; email: string } | null;
@@ -205,7 +206,7 @@ export default function TaskDetailPage() {
     setUploadError("");
 
     const path = `${task.organization_id}/${task.department_id}/tasks/${task.id}/${Date.now()}-${file.name}`;
-    const { error: uploadErr } = await supabase.storage.from("org-drive").upload(path, file);
+    const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, file);
     if (uploadErr) {
       setUploadBusy(false);
       setUploadError(uploadErr.message);

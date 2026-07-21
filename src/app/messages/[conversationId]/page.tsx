@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { Button, Badge, Avatar } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
+import { uploadFileWithRetry } from "@/lib/storage-upload";
 import { parseMessageBody, taskToken, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
 
 type PersonRef = { id: string; full_name: string | null; email: string } | null;
@@ -205,7 +206,7 @@ export default function ConversationPage() {
 
     if (pendingFile && profile) {
       const path = `${profile.organization_id}/messages/${params.conversationId}/${newId}/${Date.now()}-${pendingFile.name}`;
-      const { error: uploadErr } = await supabase.storage.from("org-drive").upload(path, pendingFile);
+      const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, pendingFile);
       if (!uploadErr) {
         await supabase.from("message_attachments").insert({
           message_id: newId,
