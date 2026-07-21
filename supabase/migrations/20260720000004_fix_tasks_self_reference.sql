@@ -87,4 +87,4 @@ create policy "super admin or owning admin can delete tasks"
     )
   );
 
-drop function public.debug_task_insert_check(uuid, uuid, uuid, uuid);
+drop function if exists public.debug_task_insert_check(uuid, uuid, uuid, uuid);

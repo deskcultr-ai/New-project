@@ -15,7 +15,7 @@
 drop policy "department resources read" on storage.objects;
 drop policy "department resources write" on storage.objects;
 drop policy "department resources delete" on storage.objects;
-drop function public.debug_resource_write_check(uuid);
+drop function if exists public.debug_resource_write_check(uuid);
 
 create or replace function public.can_read_department_resources(target_department_id uuid)
 returns boolean
