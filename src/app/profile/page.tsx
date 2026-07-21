@@ -86,14 +86,30 @@ export default function ProfileSettingsPage() {
         // can never mismatch what RLS checks against.
         const { data: authData } = await supabase.auth.getUser();
         const uid = authData.user?.id;
-        if (!uid) throw new Error("Your session has expired. Please sign in again.");
+        if (!uid) throw new Error("Your session has expired. Please sign out and sign in again.");
 
         const ext = avatarFile.name.split(".").pop() ?? "jpg";
         const path = `${uid}/avatar.${ext}`;
-        const { error: uploadErr } = await supabase.storage
+        let { error: uploadErr } = await supabase.storage
           .from("avatars")
           .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type });
-        if (uploadErr) throw new Error(`Avatar upload failed: ${uploadErr.message}`);
+
+        // A locally-persisted session can go stale (e.g. the access token
+        // expired without a refresh landing yet) in a way that still passes
+        // a local getUser() check but gets rejected server-side once the
+        // storage request actually reaches Postgres RLS. Force one refresh
+        // and retry before surfacing an error, so this self-heals instead
+        // of requiring a manual sign-out.
+        if (uploadErr && /row-level security/i.test(uploadErr.message)) {
+          const { error: refreshErr } = await supabase.auth.refreshSession();
+          if (!refreshErr) {
+            ({ error: uploadErr } = await supabase.storage
+              .from("avatars")
+              .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type }));
+          }
+        }
+
+        if (uploadErr) throw new Error(`Avatar upload failed: ${uploadErr.message}. Try signing out and back in.`);
 
         const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
         avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;
