@@ -78,8 +78,18 @@ export default function ProfileSettingsPage() {
       // dead link -- avatars need to render directly in <img> tags all over
       // the app without signed-URL round-trips or expiry).
       if (avatarFile) {
+        // The storage RLS policy requires the path's first segment to equal
+        // auth.uid() exactly. profile.id (React state, seeded from a
+        // sessionStorage cache for fast paint) could in principle lag behind
+        // the live session if it's ever stale -- read the id straight off
+        // the current session instead of trusting cached state, so the path
+        // can never mismatch what RLS checks against.
+        const { data: authData } = await supabase.auth.getUser();
+        const uid = authData.user?.id;
+        if (!uid) throw new Error("Your session has expired. Please sign in again.");
+
         const ext = avatarFile.name.split(".").pop() ?? "jpg";
-        const path = `${profile.id}/avatar.${ext}`;
+        const path = `${uid}/avatar.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("avatars")
           .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type });

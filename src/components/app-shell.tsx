@@ -262,6 +262,7 @@ export function AppShell({
 
   async function signOut() {
     await supabase.auth.signOut();
+    sessionStorage.removeItem("user_profile");
     router.replace("/login");
   }
 
