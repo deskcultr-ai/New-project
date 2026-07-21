@@ -16,7 +16,7 @@
     "NEXT_PUBLIC_APP_URL": "https://deskculture.deskcultr.workers.dev",
     "NEXT_PUBLIC_SUPABASE_URL": "https://afsksxyryvxjaftblufv.supabase.co",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmc2tzeHlyeXZ4amFmdGJsdWZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNzAwODcsImV4cCI6MjA5OTg0NjA4N30.BZEeKehKiX8_Mvv4CwQmkihKHQ0kbalpiCudsASvhL4",
-    "INVITE_FROM_EMAIL": "Deskcultr <onboarding@resend.dev>",
+    "INVITE_FROM_EMAIL": "DeskCulture <hello@aviicoder.site>",
     // Public by nature (ships in the client bundle) -- it's only a UX
     // shortcut. The real gate is the server-only PLATFORM_OWNER_EMAILS
     // secret, checked independently in /api/platform-admin/requests.

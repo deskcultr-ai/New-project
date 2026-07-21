@@ -105,8 +105,12 @@ export default function PlatformAdminRequestsPage() {
     load();
   }
 
-  async function deleteRequest(requestId: string) {
-    if (!window.confirm("Are you sure you want to delete this request permanently?")) return;
+  async function deleteRequest(requestId: string, status: OrgRequest["status"]) {
+    const confirmMessage =
+      status === "approved"
+        ? "This organization is live. Deleting it will permanently remove the org, every person in it (Super Admin, Admins, Employees -- nobody will be able to log in again), all their tasks/messages/files, and this request. They'd need to submit a brand new request to get back in. Continue?"
+        : "Are you sure you want to delete this request permanently?";
+    if (!window.confirm(confirmMessage)) return;
     setBusyId(requestId);
     setError("");
     setNotice("");
@@ -130,7 +134,7 @@ export default function PlatformAdminRequestsPage() {
       return;
     }
 
-    setNotice("Request deleted successfully.");
+    setNotice(status === "approved" ? "Organization and everyone in it were deleted." : "Request deleted successfully.");
     load();
   }
 
@@ -196,10 +200,10 @@ export default function PlatformAdminRequestsPage() {
                 <button
                   type="button"
                   disabled={busyId === req.id}
-                  onClick={() => deleteRequest(req.id)}
+                  onClick={() => deleteRequest(req.id, req.status)}
                   className="grid h-10 w-10 place-items-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-500 hover:bg-red-500/20 disabled:opacity-50 transition cursor-pointer shrink-0"
-                  title="Delete Request"
-                  aria-label="Delete Request"
+                  title={req.status === "approved" ? "Delete organization and everyone in it" : "Delete Request"}
+                  aria-label={req.status === "approved" ? "Delete organization and everyone in it" : "Delete Request"}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="h-5 w-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />

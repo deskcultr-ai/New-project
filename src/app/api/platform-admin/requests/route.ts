@@ -1,7 +1,64 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
 import { getBearerUser, isPlatformOwnerEmail } from "@/lib/auth-server";
 import { envValue, appOrigin } from "@/lib/env";
+
+const DRIVE_BUCKET = "org-drive";
+
+/** Recursively lists every file under a storage prefix (Supabase Storage's list() is one level deep only). */
+async function listFilesRecursive(admin: SupabaseClient, prefix: string): Promise<string[]> {
+  const { data, error } = await admin.storage.from(DRIVE_BUCKET).list(prefix, { limit: 1000 });
+  if (error || !data) return [];
+
+  const files: string[] = [];
+  for (const entry of data) {
+    const entryPath = `${prefix}/${entry.name}`;
+    if (entry.id === null) {
+      // A null id means this listing is a "folder" (a common path prefix), not a file -- recurse into it.
+      files.push(...(await listFilesRecursive(admin, entryPath)));
+    } else {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+/** Deletes every stored file (attachments, resources, personal folders, avatars) under an organization's prefix. */
+async function deleteOrgStorage(admin: SupabaseClient, organizationId: string) {
+  const files = await listFilesRecursive(admin, organizationId);
+  if (files.length === 0) return;
+  for (let i = 0; i < files.length; i += 100) {
+    await admin.storage.from(DRIVE_BUCKET).remove(files.slice(i, i + 100));
+  }
+}
+
+/**
+ * Fully tears down an approved organization: every person's auth account
+ * (so they can never log in again), the org row (which cascades
+ * departments/tasks/conversations/messages/activity logs via FK), and its
+ * stored files. task_forward_requests references profiles without a
+ * cascade, so it's cleared explicitly first to avoid an FK violation.
+ */
+async function deleteOrganizationFully(admin: SupabaseClient, organizationId: string) {
+  const { data: profiles } = await admin.from("profiles").select("id").eq("organization_id", organizationId);
+  const profileIds = (profiles ?? []).map((p) => p.id as string);
+
+  const { data: tasks } = await admin.from("tasks").select("id").eq("organization_id", organizationId);
+  const taskIds = (tasks ?? []).map((t) => t.id as string);
+  if (taskIds.length > 0) {
+    await admin.from("task_forward_requests").delete().in("task_id", taskIds);
+  }
+
+  await deleteOrgStorage(admin, organizationId);
+
+  const { error: orgDeleteError } = await admin.from("organizations").delete().eq("id", organizationId);
+  if (orgDeleteError) throw new Error(orgDeleteError.message);
+
+  for (const profileId of profileIds) {
+    await admin.auth.admin.deleteUser(profileId);
+  }
+}
 
 async function requirePlatformOwner(request: Request) {
   const bearer = await getBearerUser(request);
@@ -124,6 +181,21 @@ export async function DELETE(request: Request) {
   }
 
   const admin = await getSupabaseAdmin();
+
+  // If this request was approved, an organization (with real people signed
+  // into it) exists and must be fully torn down first -- otherwise deleting
+  // just this request row would only detach it (org_request_id is ON DELETE
+  // SET NULL), leaving the org and everyone's login access intact.
+  const { data: org } = await admin.from("organizations").select("id").eq("org_request_id", id).maybeSingle();
+  if (org) {
+    try {
+      await deleteOrganizationFully(admin, org.id as string);
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "Could not delete the organization.";
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
+  }
+
   const { error } = await admin.from("pending_org_requests").delete().eq("id", id);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });

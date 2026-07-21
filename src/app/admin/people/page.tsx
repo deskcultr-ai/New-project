@@ -41,12 +41,6 @@ export default function AdminPeoplePage() {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
-
-  // Expandable department details
-  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
-  const [deptTasks, setDeptTasks] = useState<any[]>([]);
-  const [deptLogs, setDeptLogs] = useState<any[]>([]);
-  const [loadingDetails, setLoadingDetails] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
   const load = useCallback(async () => {
@@ -139,34 +133,7 @@ export default function AdminPeoplePage() {
       return;
     }
 
-    if (selectedDeptId === deptId) setSelectedDeptId(null);
     load();
-  }
-
-  async function selectDepartment(deptId: string) {
-    if (selectedDeptId === deptId) {
-      setSelectedDeptId(null);
-      return;
-    }
-    setSelectedDeptId(deptId);
-    setLoadingDetails(true);
-
-    const [{ data: tasksRow }, { data: logsRow }] = await Promise.all([
-      supabase.from("tasks").select("id, title, status, priority, due_date").eq("department_id", deptId),
-      supabase.from("activity_logs").select("id, action, details, created_at").order("created_at", { ascending: false }).limit(6)
-    ]);
-
-    setDeptTasks(tasksRow ?? []);
-    // Simple filter since activity_logs organization-wide schema might not be department-scoped,
-    // or log structure logs the department name in details
-    const filteredLogs = (logsRow ?? []).filter((l) => {
-      return (
-        l.details?.department_id === deptId ||
-        l.details?.name === departments.find((d) => d.id === deptId)?.name
-      );
-    });
-    setDeptLogs(filteredLogs);
-    setLoadingDetails(false);
   }
 
   async function sendInvite(event: React.FormEvent) {
@@ -219,55 +186,58 @@ export default function AdminPeoplePage() {
   }
 
   return (
-    <AppShell profile={profile} title={profile.role === "super_admin" ? "Departments & People" : "Team"}>
+    <AppShell profile={profile} title="Departments & People">
       <div className="space-y-8">
-        {profile.role === "super_admin" && (
-          <Card>
-            <h2 className="text-base font-bold text-[var(--text-primary)]">Departments</h2>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">Create the departments your organization is split into.</p>
+        <Card>
+          <h2 className="text-base font-bold text-[var(--text-primary)]">Departments</h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {profile.role === "super_admin"
+              ? "Create the departments your organization is split into. Click any department to see its people, tasks, and activity."
+              : "Every department in your organization. Click one to see its people, tasks, and activity."}
+          </p>
+          {profile.role === "super_admin" && (
             <form onSubmit={createDepartment} className="mt-4 flex gap-3">
               <Input value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} placeholder="e.g. Marketing" className="flex-1" />
               <Button type="submit" disabled={deptBusy || !newDeptName.trim()}>
                 {deptBusy ? "Adding..." : "Add department"}
               </Button>
             </form>
-            {deptError && <Alert tone="danger" className="mt-3">{deptError}</Alert>}
-            {deleteError && <Alert tone="danger" className="mt-3">{deleteError}</Alert>}
-            
-            {/* Grid of Department Cards */}
-            <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {departments.map((d, index) => {
-                const deptMembers = people.filter((p) => p.department_id === d.id);
-                const gradients = [
-                  "linear-gradient(135deg,#818cf8,#6366f1)",
-                  "linear-gradient(135deg,#2dd4bf,#14b8a6)",
-                  "linear-gradient(135deg,#c084fc,#a855f7)",
-                  "linear-gradient(135deg,#f9a8d4,#f472b6)",
-                  "linear-gradient(135deg,#60a5fa,#3b82f6)"
-                ];
-                const grad = gradients[index % gradients.length];
-                const isSelected = selectedDeptId === d.id;
+          )}
+          {deptError && <Alert tone="danger" className="mt-3">{deptError}</Alert>}
+          {deleteError && <Alert tone="danger" className="mt-3">{deleteError}</Alert>}
 
-                return (
-                  <div
-                    key={d.id}
-                    onClick={() => selectDepartment(d.id)}
-                    className={`glass-panel p-4 cursor-pointer hover:border-purple-500 transition-all rounded-2xl border ${
-                      isSelected ? "border-purple-500 ring-2 ring-purple-500/20" : "border-[var(--glass-border-soft)]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-xl flex items-center justify-center font-bold text-white text-sm shrink-0" style={{ background: grad }}>
-                          {d.name.substring(0, 1).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-bold text-[var(--text-primary)] m-0 truncate text-sm">{d.name}</p>
-                          <p className="text-[var(--text-secondary)] m-0 mt-0.5 text-xs font-semibold">
-                            {deptMembers.length} member{deptMembers.length === 1 ? "" : "s"}
-                          </p>
-                        </div>
+          {/* Grid of Department Cards */}
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {departments.map((d, index) => {
+              const deptMembers = people.filter((p) => p.department_id === d.id);
+              const gradients = [
+                "linear-gradient(135deg,#818cf8,#6366f1)",
+                "linear-gradient(135deg,#2dd4bf,#14b8a6)",
+                "linear-gradient(135deg,#c084fc,#a855f7)",
+                "linear-gradient(135deg,#f9a8d4,#f472b6)",
+                "linear-gradient(135deg,#60a5fa,#3b82f6)"
+              ];
+              const grad = gradients[index % gradients.length];
+
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => router.push(`/admin/departments/${d.id}`)}
+                  className="glass-panel p-4 cursor-pointer hover:border-purple-500 transition-all rounded-2xl border border-[var(--glass-border-soft)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl flex items-center justify-center font-bold text-white text-sm shrink-0" style={{ background: grad }}>
+                        {d.name.substring(0, 1).toUpperCase()}
                       </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-[var(--text-primary)] m-0 truncate text-sm">{d.name}</p>
+                        <p className="text-[var(--text-secondary)] m-0 mt-0.5 text-xs font-semibold">
+                          {deptMembers.length} member{deptMembers.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                    </div>
+                    {profile.role === "super_admin" && (
                       <button
                         type="button"
                         onClick={(e) => deleteDepartment(d.id, e)}
@@ -278,87 +248,14 @@ export default function AdminPeoplePage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                       </button>
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-              {departments.length === 0 && <p className="text-sm text-[var(--text-tertiary)] col-span-full py-4 text-center">No departments yet.</p>}
-            </div>
-
-            {/* Expandable Department Details Panel */}
-            {selectedDeptId && (
-              <div className="mt-5 rounded-2xl border border-[var(--divider)] bg-[var(--surface-faint)] p-5">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-purple-400 m-0">
-                    Department Details: {departments.find((d) => d.id === selectedDeptId)?.name}
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDeptId(null)}
-                    className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] border-0 bg-transparent cursor-pointer font-bold"
-                  >
-                    Close Panel
-                  </button>
                 </div>
-                {loadingDetails ? (
-                  <div className="py-6 text-center text-xs text-[var(--text-tertiary)]">Loading details...</div>
-                ) : (
-                  <div className="grid gap-6 md:grid-cols-3">
-                    {/* Employees */}
-                    <div>
-                      <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Employees</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
-                        {people.filter((p) => p.department_id === selectedDeptId).map((person) => (
-                          <div key={person.profile_id} className="text-xs bg-[var(--surface-soft)] p-2 rounded-xl">
-                            <span className="font-semibold text-[var(--text-primary)] block truncate">{person.full_name || person.email}</span>
-                            <span className="text-[var(--text-tertiary)]">{person.email}</span>
-                          </div>
-                        ))}
-                        {people.filter((p) => p.department_id === selectedDeptId).length === 0 && (
-                          <p className="text-xs text-[var(--text-tertiary)] italic">No members.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Tasks */}
-                    <div>
-                      <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Tasks</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
-                        {deptTasks.map((t) => (
-                          <div key={t.id} className="text-xs bg-[var(--surface-soft)] p-2 rounded-xl flex justify-between items-center gap-2">
-                            <span className="font-semibold text-[var(--text-primary)] truncate">{t.title}</span>
-                            <Badge tone={t.status === "done" ? "success" : t.status === "in_progress" ? "info" : "neutral"} className="text-[9px] px-1.5 py-0.5 shrink-0">
-                              {t.status}
-                            </Badge>
-                          </div>
-                        ))}
-                        {deptTasks.length === 0 && (
-                          <p className="text-xs text-[var(--text-tertiary)] italic">No tasks.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Activity */}
-                    <div>
-                      <h4 className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">Recent activity</h4>
-                      <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar">
-                        {deptLogs.map((l) => (
-                          <div key={l.id} className="text-[10px] bg-[var(--surface-soft)] p-2 rounded-xl">
-                            <span className="font-semibold text-[var(--text-primary)] block">{l.action.replace(".", " ")}</span>
-                            <span className="text-[var(--text-tertiary)]">{new Date(l.created_at).toLocaleDateString()}</span>
-                          </div>
-                        ))}
-                        {deptLogs.length === 0 && (
-                          <p className="text-xs text-[var(--text-tertiary)] italic">No recent activity.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </Card>
-        )}
+              );
+            })}
+            {departments.length === 0 && <p className="text-sm text-[var(--text-tertiary)] col-span-full py-4 text-center">No departments yet.</p>}
+          </div>
+        </Card>
 
         {/* Define deptName helper */}
         {(() => {
@@ -402,22 +299,30 @@ export default function AdminPeoplePage() {
 
               <Card>
                 <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "super_admin" ? "Org directory" : "Your team"}</h2>
+                {profile.role === "admin" && (
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                    Your own department. Click any department card above to see people in other departments.
+                  </p>
+                )}
                 <div className="mt-4 space-y-3">
-                  {people.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">Nobody here yet.</p>}
-                  {people.map((person) => (
-                    <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
-                      <div>
-                        <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || person.email}</p>
-                        <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{person.email} · {deptName(person.department_id)}</p>
+                  {(() => {
+                    const visiblePeople = profile.role === "admin" ? people.filter((p) => p.department_id === profile.department_id) : people;
+                    if (visiblePeople.length === 0) return <p className="text-sm text-[var(--text-tertiary)]">Nobody here yet.</p>;
+                    return visiblePeople.map((person) => (
+                      <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
+                        <div>
+                          <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || person.email}</p>
+                          <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{person.email} · {deptName(person.department_id)}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
+                          <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
+                            {person.role.replace("_", " ")}
+                          </Badge>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
-                        <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
-                          {person.role.replace("_", " ")}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </Card>
             </>
