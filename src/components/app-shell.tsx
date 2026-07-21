@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -157,35 +156,6 @@ function NotificationBell({ profileId }: { profileId: string }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [panelPos, setPanelPos] = useState({ top: 0, right: 0 });
-
-  // The header's real height varies per page (some pass extra actions/a
-  // search bar), so a fixed CSS offset for the panel doesn't line up with
-  // where the bell actually is on every page. Anchor to the bell's real
-  // on-screen position instead -- the same approach GitHub's dropdowns use.
-  function positionPanel() {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPanelPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
-  }
-
-  function toggleOpen() {
-    if (!open) positionPanel();
-    setOpen((value) => !value);
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    positionPanel();
-    window.addEventListener("resize", positionPanel);
-    window.addEventListener("scroll", positionPanel, true);
-    return () => {
-      window.removeEventListener("resize", positionPanel);
-      window.removeEventListener("scroll", positionPanel, true);
-    };
-  }, [open]);
 
   // Browser popup notifications (Notification API) -- shows an OS-level
   // toast while this tab is open in the background, same behavior as any
@@ -245,12 +215,7 @@ function NotificationBell({ profileId }: { profileId: string }) {
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      // The panel is portaled to document.body (see below), so it's not a
-      // DOM descendant of wrapperRef anymore -- check both explicitly.
-      const insideButton = wrapperRef.current?.contains(target);
-      const insidePanel = panelRef.current?.contains(target);
-      if (!insideButton && !insidePanel) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
@@ -280,9 +245,8 @@ function NotificationBell({ profileId }: { profileId: string }) {
   return (
     <div className="relative" ref={wrapperRef}>
       <button
-        ref={buttonRef}
         aria-label="Notifications"
-        onClick={toggleOpen}
+        onClick={() => setOpen((value) => !value)}
         className="ping-btn glass-panel"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
@@ -293,51 +257,44 @@ function NotificationBell({ profileId }: { profileId: string }) {
           <span className="ping-dot"></span>
         )}
       </button>
-      {open &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <>
-            {/* Rendered via a portal straight onto <body>: several ancestors
-                in this design use .glass-panel, which sets backdrop-filter --
-                and a backdrop-filter/filter/transform on ANY ancestor makes
-                position:fixed resolve relative to that ancestor instead of
-                the viewport (a real CSS behavior, not a bug in the math
-                here). Escaping the DOM tree entirely is what actually makes
-                "fixed" mean "fixed to the viewport" again on every page. */}
-            <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
-            <div
-              ref={panelRef}
-              className="fixed z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl"
-              style={{ top: panelPos.top, right: panelPos.right }}
-            >
-              <div className="border-b border-[var(--divider)] px-4 py-3">
-                <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
-              </div>
-              <div className="max-h-[320px] overflow-y-auto p-2">
-                {items.length > 0 ? (
-                  items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => openNotification(item)}
-                      className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
-                    >
-                      <span className="mt-0.5 shrink-0 text-base leading-none">{NOTIFICATION_ICON[item.type] ?? "🔔"}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
-                        {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
-                      </span>
-                      {!item.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />}
-                    </button>
-                  ))
-                ) : (
-                  <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
-                )}
-              </div>
-            </div>
-          </>,
-          document.body
-        )}
+      {open && (
+        // Tailwind v4 wraps its utility classes in a CSS @layer, and .glass-panel
+        // (an unlayered rule in globals.css) sets its own `position: relative`
+        // -- unlayered rules always beat layered ones regardless of specificity
+        // or source order, so the "absolute"/"fixed" utility class was being
+        // silently overridden back to relative this whole time, no matter which
+        // one was used. Setting position inline guarantees it actually applies:
+        // inline styles beat both layered and unlayered class rules.
+        <div
+          className="right-0 top-[calc(100%+10px)] z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl"
+          style={{ position: "absolute" }}
+        >
+          <div className="border-b border-[var(--divider)] px-4 py-3">
+            <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
+          </div>
+          <div className="max-h-[320px] overflow-y-auto p-2">
+            {items.length > 0 ? (
+              items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openNotification(item)}
+                  className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
+                >
+                  <span className="mt-0.5 shrink-0 text-base leading-none">{NOTIFICATION_ICON[item.type] ?? "🔔"}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
+                    {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
+                  </span>
+                  {!item.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />}
+                </button>
+              ))
+            ) : (
+              <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
