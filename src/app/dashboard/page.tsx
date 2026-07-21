@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, displayName, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Card, Badge } from "@/components/ui";
-import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, type Task } from "@/lib/tasks";
+import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task } from "@/lib/tasks";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -58,22 +58,26 @@ export default function DashboardPage() {
         {tasks.length === 0 && (
           <Card className="text-center text-sm text-slate-500">Nothing assigned to you yet.</Card>
         )}
-        {tasks.map((task) => (
-          <Card key={task.id} hover className="cursor-pointer" onClick={() => router.push(`/tasks/${task.id}`)}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-slate-900">{task.title}</p>
-                {task.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{task.description}</p>}
+        {tasks.map((task) => {
+          const urgency = getDueUrgency(task.due_date, task.status);
+          return (
+            <Card key={task.id} hover className="cursor-pointer" onClick={() => router.push(`/tasks/${task.id}`)}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">{task.title}</p>
+                  {task.description && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{task.description}</p>}
+                </div>
+                {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
               </div>
-              {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
-              <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
-              {task.due_date && <span className="text-xs text-slate-400">Due {new Date(task.due_date).toLocaleDateString()}</span>}
-            </div>
-          </Card>
-        ))}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
+                <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+                {urgency && <Badge tone={DUE_URGENCY_TONE[urgency]}>{DUE_URGENCY_LABEL[urgency]}</Badge>}
+                {task.due_date && <span className="text-xs text-slate-400">Due {new Date(task.due_date).toLocaleDateString()}</span>}
+              </div>
+            </Card>
+          );
+        })}
       </div>
     </AppShell>
   );

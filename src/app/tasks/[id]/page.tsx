@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button, Card, Select, Badge, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
-import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
+import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
 
 type PersonRef = { id: string; full_name: string | null; username?: string | null; email: string } | null;
 type TaskDetail = {
@@ -292,6 +292,10 @@ export default function TaskDetailPage() {
               <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
               {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
               <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
+              {(() => {
+                const urgency = getDueUrgency(task.due_date, task.status);
+                return urgency ? <Badge tone={DUE_URGENCY_TONE[urgency]}>{DUE_URGENCY_LABEL[urgency]}</Badge> : null;
+              })()}
             </div>
             {task.description && <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">{task.description}</p>}
             <dl className="mt-4 grid grid-cols-2 gap-3 text-xs text-[var(--text-tertiary)]">

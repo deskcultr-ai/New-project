@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
-import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
+import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
 
 type Department = { id: string; name: string };
 type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string };
@@ -48,6 +48,11 @@ export default function AdminTasksPage() {
   const [forwardBusyId, setForwardBusyId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState<Record<string, string>>({});
   const [forwardNotice, setForwardNotice] = useState("");
+
+  const [search, setSearch] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [filterOverdue, setFilterOverdue] = useState(false);
 
   const load = useCallback(async () => {
     const me = await getProfile();
@@ -160,6 +165,22 @@ export default function AdminTasksPage() {
     if (!p) return "—";
     return p.username ? `@${p.username}` : p.full_name || p.email;
   };
+
+  const searchLower = search.trim().toLowerCase();
+  const visibleTasks = tasks.filter((t) => {
+    if (searchLower && !t.title.toLowerCase().includes(searchLower) && !(t.description ?? "").toLowerCase().includes(searchLower)) return false;
+    if (filterAssignee === "__unassigned__" ? t.assigned_to !== null : filterAssignee && t.assigned_to !== filterAssignee) return false;
+    if (filterPriority && t.priority !== filterPriority) return false;
+    if (filterOverdue && getDueUrgency(t.due_date, t.status) !== "overdue") return false;
+    return true;
+  });
+  const hasFilters = !!(search || filterAssignee || filterPriority || filterOverdue);
+  function clearFilters() {
+    setSearch("");
+    setFilterAssignee("");
+    setFilterPriority("");
+    setFilterOverdue(false);
+  }
 
   return (
     <AppShell profile={profile} title="Tasks" subtitle="Org-wide board">
@@ -288,33 +309,74 @@ export default function AdminTasksPage() {
           </Card>
         )}
 
+        <Card>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-[200px] flex-1 text-sm font-semibold text-[var(--text-secondary)]">
+              Search
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title or description..." className="mt-2" />
+            </label>
+            <label className="text-sm font-semibold text-[var(--text-secondary)]">
+              Assignee
+              <Select value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)} className="mt-2 w-48">
+                <option value="">Everyone</option>
+                <option value="__unassigned__">Unassigned</option>
+                {assignees.map((p) => (
+                  <option key={p.id} value={p.id}>{p.username ? `@${p.username}` : p.full_name || p.email}</option>
+                ))}
+              </Select>
+            </label>
+            <label className="text-sm font-semibold text-[var(--text-secondary)]">
+              Priority
+              <Select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="mt-2 w-40">
+                <option value="">Any priority</option>
+                {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex h-11 items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]">
+              <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
+              Overdue only
+            </label>
+            {hasFilters && (
+              <button type="button" onClick={clearFilters} className="h-11 text-sm font-bold text-primary bg-transparent border-0 cursor-pointer">
+                Clear filters
+              </button>
+            )}
+          </div>
+        </Card>
+
         <div className="grid gap-4 lg:grid-cols-4">
           {STATUS_ORDER.map((status) => (
             <div key={status}>
               <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
-                {STATUS_LABEL[status]} · {tasks.filter((t) => t.status === status).length}
+                {STATUS_LABEL[status]} · {visibleTasks.filter((t) => t.status === status).length}
               </h3>
               <div className="space-y-3">
-                {tasks.filter((t) => t.status === status).map((task) => (
-                  <Card
-                    key={task.id}
-                    hover
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/tasks/${task.id}`)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-bold text-[var(--text-primary)]">{task.title}</p>
-                      {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
-                    </div>
-                    <p className="mt-2 text-xs text-[var(--text-secondary)]">{personName(task.assigned_to)} · {deptName(task.department_id)}</p>
-                    <div className="mt-3 flex items-center justify-between">
-                      <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
-                      {task.due_date && <span className="text-xs text-[var(--text-tertiary)]">{new Date(task.due_date).toLocaleDateString()}</span>}
-                    </div>
-                  </Card>
-                ))}
-                {tasks.filter((t) => t.status === status).length === 0 && (
-                  <p className="text-sm text-[var(--text-tertiary)]">No tasks.</p>
+                {visibleTasks.filter((t) => t.status === status).map((task) => {
+                  const urgency = getDueUrgency(task.due_date, task.status);
+                  return (
+                    <Card
+                      key={task.id}
+                      hover
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/tasks/${task.id}`)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-[var(--text-primary)]">{task.title}</p>
+                        {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
+                      </div>
+                      <p className="mt-2 text-xs text-[var(--text-secondary)]">{personName(task.assigned_to)} · {deptName(task.department_id)}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+                        {urgency && <Badge tone={DUE_URGENCY_TONE[urgency]}>{DUE_URGENCY_LABEL[urgency]}</Badge>}
+                        {task.due_date && <span className="text-xs text-[var(--text-tertiary)]">{new Date(task.due_date).toLocaleDateString()}</span>}
+                      </div>
+                    </Card>
+                  );
+                })}
+                {visibleTasks.filter((t) => t.status === status).length === 0 && (
+                  <p className="text-sm text-[var(--text-tertiary)]">{hasFilters ? "No matching tasks." : "No tasks."}</p>
                 )}
               </div>
             </div>

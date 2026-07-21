@@ -11,7 +11,7 @@ export type Task = {
   is_blocked: boolean;
   priority: TaskPriority;
   due_date: string | null;
-  created_by: string;
+  created_by: string | null;
   assigned_to: string | null;
   created_at: string;
   updated_at: string;
@@ -38,4 +38,29 @@ export const PRIORITY_TONE: Record<TaskPriority, "neutral" | "info" | "warning" 
   medium: "info",
   high: "warning",
   urgent: "danger",
+};
+
+export type DueUrgency = "overdue" | "soon";
+
+/** Overdue: past due and not done. Soon: due within 2 days and not done. Otherwise null (no badge needed). */
+export function getDueUrgency(dueDate: string | null, status: TaskStatus): DueUrgency | null {
+  if (!dueDate || status === "done") return null;
+  const due = new Date(dueDate);
+  const today = new Date();
+  due.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+  const diffDays = (due.getTime() - today.getTime()) / 86400000;
+  if (diffDays < 0) return "overdue";
+  if (diffDays <= 2) return "soon";
+  return null;
+}
+
+export const DUE_URGENCY_LABEL: Record<DueUrgency, string> = {
+  overdue: "Overdue",
+  soon: "Due soon",
+};
+
+export const DUE_URGENCY_TONE: Record<DueUrgency, "danger" | "warning"> = {
+  overdue: "danger",
+  soon: "warning",
 };
