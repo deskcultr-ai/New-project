@@ -9,13 +9,14 @@ import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
 import { parseMessageBody, taskToken, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
 
-type PersonRef = { id: string; full_name: string | null; email: string } | null;
+type PersonRef = { id: string; full_name: string | null; username: string | null; email: string } | null;
 type MessageRow = {
   id: string;
   conversation_id: string;
   author_id: string;
   body: string;
   created_at: string;
+  reply_to_message_id: string | null;
   author: PersonRef;
 };
 type Attachment = { id: string; message_id: string; storage_path: string; file_name: string; file_size: number; content_type: string | null };
@@ -23,6 +24,11 @@ type Reaction = { id: string; message_id: string; profile_id: string; emoji: str
 type TaskPreview = { id: string; title: string; status: string };
 type DirectoryPerson = { id: string; full_name: string | null; email: string };
 type TaskSuggestion = { id: string; title: string };
+
+function personLabel(person: PersonRef) {
+  if (!person) return "?";
+  return person.username ? `@${person.username}` : person.full_name || person.email;
+}
 
 export default function ConversationPage() {
   const params = useParams<{ conversationId: string }>();
@@ -36,6 +42,7 @@ export default function ConversationPage() {
   const [reactions, setReactions] = useState<Reaction[]>([]);
   const [taskPreviews, setTaskPreviews] = useState<Record<string, TaskPreview | null>>({});
   const [directory, setDirectory] = useState<DirectoryPerson[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
 
   const [body, setBody] = useState("");
   const [mentionedIds, setMentionedIds] = useState<string[]>([]);
@@ -45,6 +52,10 @@ export default function ConversationPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const [replyBody, setReplyBody] = useState("");
+  const [replySending, setReplySending] = useState(false);
+  const threadBottomRef = useRef<HTMLDivElement>(null);
 
   const loadTaskPreviews = useCallback(async (bodies: string[]) => {
     const ids = new Set<string>();
@@ -85,7 +96,7 @@ export default function ConversationPage() {
 
     const { data: messageRows } = await supabase
       .from("messages")
-      .select("id, conversation_id, author_id, body, created_at, author:profiles(id,full_name,email)")
+      .select("id, conversation_id, author_id, body, created_at, reply_to_message_id, author:profiles(id,full_name,username,email)")
       .eq("conversation_id", params.conversationId)
       .order("created_at", { ascending: true });
     const rows = (messageRows ?? []) as unknown as MessageRow[];
@@ -129,7 +140,7 @@ export default function ConversationPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${params.conversationId}` },
         async (payload) => {
-          const { data: author } = await supabase.from("profiles").select("id, full_name, email").eq("id", (payload.new as { author_id: string }).author_id).maybeSingle();
+          const { data: author } = await supabase.from("profiles").select("id, full_name, username, email").eq("id", (payload.new as { author_id: string }).author_id).maybeSingle();
           const row = { ...(payload.new as MessageRow), author: author ?? null };
           setMessages((current) => [...current, row]);
           loadTaskPreviews([row.body]);
@@ -148,9 +159,21 @@ export default function ConversationPage() {
     };
   }, [params.conversationId, loadTaskPreviews]);
 
+  const topLevelMessages = messages.filter((m) => !m.reply_to_message_id);
+  const activeThread = activeThreadId ? messages.find((m) => m.id === activeThreadId) ?? null : null;
+  const threadReplies = activeThreadId ? messages.filter((m) => m.reply_to_message_id === activeThreadId) : [];
+
+  function replyCount(messageId: string) {
+    return messages.filter((m) => m.reply_to_message_id === messageId).length;
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [topLevelMessages.length]);
+
+  useEffect(() => {
+    threadBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [threadReplies.length, activeThreadId]);
 
   function onBodyChange(value: string) {
     setBody(value);
@@ -226,6 +249,26 @@ export default function ConversationPage() {
     load();
   }
 
+  async function sendReply(event: React.FormEvent) {
+    event.preventDefault();
+    if (!profile || !activeThreadId || !replyBody.trim()) return;
+    setReplySending(true);
+
+    const { error: sendError } = await supabase.rpc("post_message", {
+      p_conversation_id: params.conversationId,
+      p_body: replyBody.trim(),
+      p_reply_to_message_id: activeThreadId,
+    });
+
+    setReplySending(false);
+    if (sendError) {
+      setError(sendError.message);
+      return;
+    }
+    setReplyBody("");
+    load();
+  }
+
   async function toggleReaction(messageId: string, emoji: string) {
     if (!profile) return;
     const existing = reactions.find((r) => r.message_id === messageId && r.profile_id === profile.id && r.emoji === emoji);
@@ -268,106 +311,222 @@ export default function ConversationPage() {
   const canPost = conversationType !== "announcement" || profile.role === "super_admin";
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        {messages.map((message) => {
-          const isMe = message.author_id === profile.id;
-          const msgAttachments = attachments.filter((a) => a.message_id === message.id);
-          const msgReactions = reactions.filter((r) => r.message_id === message.id);
-          return (
-            <div key={message.id} className={`flex gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
-              <Avatar name={message.author?.full_name || message.author?.email || "?"} size="sm" />
-              <div className={`max-w-[72%] ${isMe ? "items-end text-right" : ""}`}>
-                <p className="text-xs font-semibold text-[var(--text-secondary)]">
-                  {message.author?.full_name || message.author?.email} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </p>
-                <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
-                  {parseMessageBody(message.body).map((segment, i) =>
-                    segment.type === "text" ? (
-                      <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
-                    ) : (
-                      <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => router.push(`/tasks/${segment.id}`)} />
-                    )
-                  )}
-                </div>
-                {msgAttachments.length > 0 && (
-                  <div className="mt-1 space-y-1">
-                    {msgAttachments.map((a) => (
-                      <button key={a.id} type="button" onClick={() => downloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
-                        📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
+    <div className="flex h-full">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {topLevelMessages.map((message) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              isMe={message.author_id === profile.id}
+              attachments={attachments.filter((a) => a.message_id === message.id)}
+              reactions={reactions.filter((r) => r.message_id === message.id)}
+              myProfileId={profile.id}
+              taskPreviews={taskPreviews}
+              onOpenTask={(id) => router.push(`/tasks/${id}`)}
+              onToggleReaction={(emoji) => toggleReaction(message.id, emoji)}
+              onDownloadFile={downloadFile}
+              replyCount={replyCount(message.id)}
+              onOpenThread={() => setActiveThreadId(message.id)}
+            />
+          ))}
+          {topLevelMessages.length === 0 && <p className="text-center text-sm text-[var(--text-tertiary)]">No messages yet. Say hello.</p>}
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="border-t border-[var(--divider)] p-3">
+          {!canPost ? (
+            <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Super Admin can post to Announcements.</p>
+          ) : (
+            <form onSubmit={sendMessage} className="space-y-2">
+              <div className="relative">
+                {suggestMentions.length > 0 && (
+                  <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
+                    {suggestMentions.map((p) => (
+                      <button key={p.id} type="button" onClick={() => pickMention(p)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+                        {p.full_name || p.email}
                       </button>
                     ))}
                   </div>
                 )}
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                  {REACTION_EMOJI.map((emoji) => {
-                    const count = msgReactions.filter((r) => r.emoji === emoji).length;
-                    if (count === 0) return null;
-                    const mine = msgReactions.some((r) => r.emoji === emoji && r.profile_id === profile.id);
-                    return (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => toggleReaction(message.id, emoji)}
-                        className={`rounded-full border border-[var(--glass-border-soft)] px-2 py-0.5 text-xs transition cursor-pointer ${mine ? "bg-[#8b5cf6] text-white" : "bg-[var(--surface-soft)] text-[var(--text-secondary)]"}`}
-                      >
-                        {emoji} {count}
+                {suggestTasks.length > 0 && (
+                  <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
+                    {suggestTasks.map((t) => (
+                      <button key={t.id} type="button" onClick={() => pickTask(t)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+                        {t.title}
                       </button>
-                    );
-                  })}
-                  <ReactionPicker onPick={(emoji) => toggleReaction(message.id, emoji)} />
-                </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  value={body}
+                  onChange={(e) => onBodyChange(e.target.value)}
+                  rows={2}
+                  placeholder="Message... use @ to mention, # to reference a task"
+                  className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
+                />
               </div>
-            </div>
-          );
-        })}
-        {messages.length === 0 && <p className="text-center text-sm text-[var(--text-tertiary)]">No messages yet. Say hello.</p>}
-        <div ref={bottomRef} />
+              <div className="flex items-center justify-between gap-3">
+                <input type="file" onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)} className="text-xs text-[var(--text-secondary)]" />
+                <Button type="submit" disabled={sending || !body.trim()}>
+                  {sending ? "Sending..." : "Send"}
+                </Button>
+              </div>
+              {error && <p className="text-xs text-red-600">{error}</p>}
+            </form>
+          )}
+        </div>
       </div>
 
-      <div className="border-t border-[var(--divider)] p-3">
-        {!canPost ? (
-          <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Super Admin can post to Announcements.</p>
-        ) : (
-          <form onSubmit={sendMessage} className="space-y-2">
-            <div className="relative">
-              {suggestMentions.length > 0 && (
-                <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
-                  {suggestMentions.map((p) => (
-                    <button key={p.id} type="button" onClick={() => pickMention(p)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
-                      {p.full_name || p.email}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {suggestTasks.length > 0 && (
-                <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
-                  {suggestTasks.map((t) => (
-                    <button key={t.id} type="button" onClick={() => pickTask(t)} className="block w-full border-0 bg-transparent px-3 py-2 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
-                      {t.title}
-                    </button>
-                  ))}
-                </div>
-              )}
+      {activeThread && (
+        <div className="flex h-full w-[340px] shrink-0 flex-col border-l border-[var(--divider)]">
+          <div className="flex items-center justify-between border-b border-[var(--divider)] p-3">
+            <p className="text-sm font-bold text-[var(--text-primary)]">Thread</p>
+            <button type="button" onClick={() => setActiveThreadId(null)} className="grid h-7 w-7 place-items-center rounded-lg border-0 bg-transparent text-[var(--text-tertiary)] hover:bg-[var(--surface-soft)] hover:text-[var(--text-primary)] cursor-pointer">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 space-y-3 overflow-y-auto p-3">
+            <MessageBubble
+              message={activeThread}
+              isMe={activeThread.author_id === profile.id}
+              attachments={attachments.filter((a) => a.message_id === activeThread.id)}
+              reactions={reactions.filter((r) => r.message_id === activeThread.id)}
+              myProfileId={profile.id}
+              taskPreviews={taskPreviews}
+              onOpenTask={(id) => router.push(`/tasks/${id}`)}
+              onToggleReaction={(emoji) => toggleReaction(activeThread.id, emoji)}
+              onDownloadFile={downloadFile}
+              compact
+            />
+            <div className="border-t border-[var(--divider)] pt-3">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {threadReplies.length} repl{threadReplies.length === 1 ? "y" : "ies"}
+              </p>
+              <div className="space-y-3">
+                {threadReplies.map((reply) => (
+                  <MessageBubble
+                    key={reply.id}
+                    message={reply}
+                    isMe={reply.author_id === profile.id}
+                    attachments={attachments.filter((a) => a.message_id === reply.id)}
+                    reactions={reactions.filter((r) => r.message_id === reply.id)}
+                    myProfileId={profile.id}
+                    taskPreviews={taskPreviews}
+                    onOpenTask={(id) => router.push(`/tasks/${id}`)}
+                    onToggleReaction={(emoji) => toggleReaction(reply.id, emoji)}
+                    onDownloadFile={downloadFile}
+                    compact
+                  />
+                ))}
+              </div>
+            </div>
+            <div ref={threadBottomRef} />
+          </div>
+          {canPost && (
+            <form onSubmit={sendReply} className="border-t border-[var(--divider)] p-3">
               <textarea
-                value={body}
-                onChange={(e) => onBodyChange(e.target.value)}
+                value={replyBody}
+                onChange={(e) => setReplyBody(e.target.value)}
                 rows={2}
-                placeholder="Message... use @ to mention, # to reference a task"
-                className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
+                placeholder="Reply in thread..."
+                className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <input type="file" onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)} className="text-xs text-[var(--text-secondary)]" />
-              <Button type="submit" disabled={sending || !body.trim()}>
-                {sending ? "Sending..." : "Send"}
+              <Button type="submit" disabled={replySending || !replyBody.trim()} className="mt-2 h-9 w-full">
+                {replySending ? "Sending..." : "Reply"}
               </Button>
-            </div>
-            {error && <p className="text-xs text-red-600">{error}</p>}
-          </form>
-        )}
-      </div>
+            </form>
+          )}
+        </div>
+      )}
+
       <FilePreviewModal target={preview.target} onClose={preview.close} />
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  isMe,
+  attachments,
+  reactions,
+  myProfileId,
+  taskPreviews,
+  onOpenTask,
+  onToggleReaction,
+  onDownloadFile,
+  replyCount,
+  onOpenThread,
+  compact,
+}: {
+  message: MessageRow;
+  isMe: boolean;
+  attachments: Attachment[];
+  reactions: Reaction[];
+  myProfileId: string;
+  taskPreviews: Record<string, TaskPreview | null>;
+  onOpenTask: (id: string) => void;
+  onToggleReaction: (emoji: string) => void;
+  onDownloadFile: (attachment: Attachment) => void;
+  replyCount?: number;
+  onOpenThread?: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`flex gap-3 ${!compact && isMe ? "flex-row-reverse" : ""}`}>
+      <Avatar name={personLabel(message.author)} size="sm" />
+      <div className={`min-w-0 ${compact ? "flex-1" : "max-w-[72%]"} ${!compact && isMe ? "items-end text-right" : ""}`}>
+        <p className="text-xs font-semibold text-[var(--text-secondary)]">
+          {personLabel(message.author)} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </p>
+        <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${!compact && isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
+          {parseMessageBody(message.body).map((segment, i) =>
+            segment.type === "text" ? (
+              <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
+            ) : (
+              <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => onOpenTask(segment.id)} />
+            )
+          )}
+        </div>
+        {attachments.length > 0 && (
+          <div className="mt-1 space-y-1">
+            {attachments.map((a) => (
+              <button key={a.id} type="button" onClick={() => onDownloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
+                📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {REACTION_EMOJI.map((emoji) => {
+            const count = reactions.filter((r) => r.emoji === emoji).length;
+            if (count === 0) return null;
+            const mine = reactions.some((r) => r.emoji === emoji && r.profile_id === myProfileId);
+            return (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => onToggleReaction(emoji)}
+                className={`rounded-full border border-[var(--glass-border-soft)] px-2 py-0.5 text-xs transition cursor-pointer ${mine ? "bg-[#8b5cf6] text-white" : "bg-[var(--surface-soft)] text-[var(--text-secondary)]"}`}
+              >
+                {emoji} {count}
+              </button>
+            );
+          })}
+          <ReactionPicker onPick={onToggleReaction} />
+          {onOpenThread && (
+            <button
+              type="button"
+              onClick={onOpenThread}
+              className="rounded-full border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)] hover:text-primary transition cursor-pointer"
+            >
+              {replyCount && replyCount > 0 ? `💬 ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "💬 Reply"}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
