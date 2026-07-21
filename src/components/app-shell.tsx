@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -157,6 +158,7 @@ function NotificationBell({ profileId }: { profileId: string }) {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [panelPos, setPanelPos] = useState({ top: 0, right: 0 });
 
   // The header's real height varies per page (some pass extra actions/a
@@ -243,7 +245,12 @@ function NotificationBell({ profileId }: { profileId: string }) {
   useEffect(() => {
     if (!open) return;
     function handleClickOutside(event: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      // The panel is portaled to document.body (see below), so it's not a
+      // DOM descendant of wrapperRef anymore -- check both explicitly.
+      const insideButton = wrapperRef.current?.contains(target);
+      const insidePanel = panelRef.current?.contains(target);
+      if (!insideButton && !insidePanel) {
         setOpen(false);
       }
     }
@@ -279,42 +286,51 @@ function NotificationBell({ profileId }: { profileId: string }) {
           <span className="ping-dot"></span>
         )}
       </button>
-      {open && (
-        <>
-          {/* fixed to the viewport, not the page flow -- can never push
-              layout around regardless of any parent's positioning */}
-          <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div
-            className="fixed z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl"
-            style={{ top: panelPos.top, right: panelPos.right }}
-          >
-            <div className="border-b border-[var(--divider)] px-4 py-3">
-              <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <>
+            {/* Rendered via a portal straight onto <body>: several ancestors
+                in this design use .glass-panel, which sets backdrop-filter --
+                and a backdrop-filter/filter/transform on ANY ancestor makes
+                position:fixed resolve relative to that ancestor instead of
+                the viewport (a real CSS behavior, not a bug in the math
+                here). Escaping the DOM tree entirely is what actually makes
+                "fixed" mean "fixed to the viewport" again on every page. */}
+            <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setOpen(false)} />
+            <div
+              ref={panelRef}
+              className="fixed z-50 w-[320px] max-w-[86vw] overflow-hidden glass-panel shadow-2xl"
+              style={{ top: panelPos.top, right: panelPos.right }}
+            >
+              <div className="border-b border-[var(--divider)] px-4 py-3">
+                <p className="text-sm font-bold text-[var(--text-primary)] m-0">Notifications</p>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto p-2">
+                {items.length > 0 ? (
+                  items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openNotification(item)}
+                      className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
+                    >
+                      <span className="mt-0.5 shrink-0 text-base leading-none">{NOTIFICATION_ICON[item.type] ?? "🔔"}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
+                        {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
+                      </span>
+                      {!item.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />}
+                    </button>
+                  ))
+                ) : (
+                  <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
+                )}
+              </div>
             </div>
-            <div className="max-h-[320px] overflow-y-auto p-2">
-              {items.length > 0 ? (
-                items.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => openNotification(item)}
-                    className="flex w-full gap-3 rounded-xl border-0 bg-transparent px-3 py-3 text-left hover:bg-[var(--surface-soft)] text-[var(--text-primary)] cursor-pointer"
-                  >
-                    <span className="mt-0.5 shrink-0 text-base leading-none">{NOTIFICATION_ICON[item.type] ?? "🔔"}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-bold text-[var(--text-primary)]">{item.title}</span>
-                      {item.body && <span className="mt-0.5 block line-clamp-2 text-xs font-semibold text-[var(--text-secondary)]">{item.body}</span>}
-                    </span>
-                    {!item.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />}
-                  </button>
-                ))
-              ) : (
-                <p className="rounded-lg px-3 py-6 text-center text-sm font-semibold text-[var(--text-secondary)] m-0">No notifications yet.</p>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+          </>,
+          document.body
+        )}
     </div>
   );
 }
