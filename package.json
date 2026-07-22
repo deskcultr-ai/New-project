@@ -7,6 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
@@ -21,6 +23,7 @@
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.20.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -29,6 +32,7 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^4.1.10",
     "wrangler": "^4.111.0"
   }
 }

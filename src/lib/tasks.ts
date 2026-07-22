@@ -45,11 +45,17 @@ export type DueUrgency = "overdue" | "soon";
 /** Overdue: past due and not done. Soon: due within 2 days and not done. Otherwise null (no badge needed). */
 export function getDueUrgency(dueDate: string | null, status: TaskStatus): DueUrgency | null {
   if (!dueDate || status === "done") return null;
+  // dueDate is a date-only string ("YYYY-MM-DD"), which the Date
+  // constructor parses as UTC midnight -- read it back with UTC getters so
+  // "July 20" means July 20 for every viewer, regardless of timezone.
+  // (Previously this mutated the UTC-parsed instant with local-time
+  // setHours(), which silently shifted the effective due date back a day
+  // in any timezone behind UTC.)
   const due = new Date(dueDate);
-  const today = new Date();
-  due.setHours(0, 0, 0, 0);
-  today.setHours(0, 0, 0, 0);
-  const diffDays = (due.getTime() - today.getTime()) / 86400000;
+  const dueUTC = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+  const now = new Date();
+  const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = (dueUTC - todayUTC) / 86400000;
   if (diffDays < 0) return "overdue";
   if (diffDays <= 2) return "soon";
   return null;
