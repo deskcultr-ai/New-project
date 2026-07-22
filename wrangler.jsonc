@@ -4,7 +4,10 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-07-17",
   // OpenNext needs node compatibility, and the app reads Supabase config from process.env.
-  "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
+  "compatibility_flags": [
+    "nodejs_compat",
+    "nodejs_compat_populate_process_env"
+  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -24,6 +27,6 @@
     // Client-side Sentry DSN (src/instrumentation-client.ts). Public by
     // design -- leave empty and error reporting simply no-ops. Fill in once
     // a Sentry project exists (Project Settings -> Client Keys) and redeploy.
-    "NEXT_PUBLIC_SENTRY_DSN": ""
+    "NEXT_PUBLIC_SENTRY_DSN": "https://7c1a9489e2286c83b9bcea3025481bbf@o4511777398063104.ingest.de.sentry.io/4511777495449680"
   }
 }

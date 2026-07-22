@@ -14,7 +14,12 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   `img-src 'self' data: blob: ${SUPABASE_ORIGIN}`,
   "font-src 'self' data:",
-  `connect-src 'self' ${SUPABASE_ORIGIN} ${SUPABASE_WS_ORIGIN} https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.us.sentry.io`,
+  // CSP wildcards only cover one subdomain label, so Sentry's per-project,
+  // per-region ingest hosts (o<id>.ingest.<region>.sentry.io -- 4 labels
+  // deep) need to be listed explicitly rather than guessed at. This is the
+  // exact host the current NEXT_PUBLIC_SENTRY_DSN resolves to; if the DSN
+  // ever changes (new project/region), update this to match.
+  `connect-src 'self' ${SUPABASE_ORIGIN} ${SUPABASE_WS_ORIGIN} https://o4511777398063104.ingest.de.sentry.io`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
