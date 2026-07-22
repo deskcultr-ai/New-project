@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_APP_URL: https://deskculture.deskcultr.workers.dev
+      NEXT_PUBLIC_SUPABASE_URL: https://afsksxyryvxjaftblufv.supabase.co
+      # Public by design (already committed in wrangler.jsonc and shipped in
+      # the client bundle) -- not a secret, safe to inline here too.
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmc2tzeHlyeXZ4amFmdGJsdWZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNzAwODcsImV4cCI6MjA5OTg0NjA4N30.BZEeKehKiX8_Mvv4CwQmkihKHQ0kbalpiCudsASvhL4
+      NEXT_PUBLIC_PLATFORM_OWNER_EMAILS: deskcultr@gmail.com
+      NEXT_PUBLIC_SENTRY_DSN: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck + build
+        run: npm run build

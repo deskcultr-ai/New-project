@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Only admins can view forward requests." }, { status: 403 });
   }
 
-  let query = bearer.userClient
+  const query = bearer.userClient
     .from("task_forward_requests")
     .select(`
       id, task_id, reason, status, rejection_note, created_at, resolved_at,

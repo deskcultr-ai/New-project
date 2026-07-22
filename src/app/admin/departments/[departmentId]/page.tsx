@@ -81,6 +81,7 @@ export default function DepartmentDetailPage() {
   }, [params.departmentId, router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used throughout the app
     load();
   }, [load]);
 

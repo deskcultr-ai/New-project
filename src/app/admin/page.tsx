@@ -36,7 +36,7 @@ interface PendingInvite {
 interface ActivityLog {
   id: string;
   action: string;
-  details: any;
+  details: { name?: string; title?: string; email?: string; role?: string } | null;
   created_at: string;
   actorName: string;
 }
@@ -83,6 +83,7 @@ export default function AdminOverviewPage() {
     // Load theme
     const savedTheme = localStorage.getItem("theme") as "dark" | "light" | null;
     const currentTheme = savedTheme || "dark";
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading localStorage must happen client-side, after mount
     setTheme(currentTheme);
     document.documentElement.setAttribute("data-theme", currentTheme);
   }, []);
@@ -823,6 +824,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     }
 
                     // Calculate time elapsed
+                    // eslint-disable-next-line react-hooks/purity -- relative "time ago" labels are inherently time-dependent; cosmetic only, doesn't affect hydration correctness
                     const minutes = Math.max(Math.round((Date.now() - new Date(log.created_at).getTime()) / (1000 * 60)), 0);
                     const timeStr = minutes === 0 ? "Just now" : minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
 

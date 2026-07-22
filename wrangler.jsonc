@@ -20,6 +20,10 @@
     // Public by nature (ships in the client bundle) -- it's only a UX
     // shortcut. The real gate is the server-only PLATFORM_OWNER_EMAILS
     // secret, checked independently in /api/platform-admin/requests.
-    "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS": "deskcultr@gmail.com"
+    "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS": "deskcultr@gmail.com",
+    // Client-side Sentry DSN (src/instrumentation-client.ts). Public by
+    // design -- leave empty and error reporting simply no-ops. Fill in once
+    // a Sentry project exists (Project Settings -> Client Keys) and redeploy.
+    "NEXT_PUBLIC_SENTRY_DSN": ""
   }
 }

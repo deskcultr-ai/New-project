@@ -154,6 +154,7 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
   useEffect(() => {
     const query = messageSearch.trim();
     if (query.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets stale results when the search box is cleared/shortened
       setSearchResults([]);
       setSearching(false);
       return;
@@ -249,7 +250,7 @@ export default function MessagesLayout({ children }: { children: React.ReactNode
               <>
                 {searching && <p className="px-3 py-6 text-center text-sm text-[var(--text-tertiary)]">Searching...</p>}
                 {!searching && searchResults.length === 0 && (
-                  <p className="px-3 py-6 text-center text-sm text-[var(--text-tertiary)]">No messages match "{messageSearch.trim()}".</p>
+                  <p className="px-3 py-6 text-center text-sm text-[var(--text-tertiary)]">No messages match &quot;{messageSearch.trim()}&quot;.</p>
                 )}
                 {!searching && searchResults.map((result) => (
                   <Link

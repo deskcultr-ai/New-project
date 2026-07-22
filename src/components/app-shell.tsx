@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
 import { displayName, type Profile } from "@/lib/session";
 
+const SUPPORT_EMAIL = "deskcultr@gmail.com";
+
 type NavItem = { label: string; href: string; icon: React.ReactNode };
 type NotificationType =
   | "mention"
@@ -121,6 +123,7 @@ function ThemeToggle() {
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme") as "dark" | "light" | null;
     const currentTheme = savedTheme || "dark";
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reading localStorage must happen client-side, after mount
     setTheme(currentTheme);
     document.documentElement.setAttribute("data-theme", currentTheme);
   }, []);
@@ -383,6 +386,16 @@ export function AppShell({
             </div>
           )}
         </div>
+        <a
+          href={`mailto:${SUPPORT_EMAIL}`}
+          title="Contact support"
+          className={cn("flex items-center justify-center gap-2 text-[13px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] decoration-none py-1.5", sidebarCollapsed ? "px-0" : "")}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0-.828.672-1.5 1.5-1.5h16.5c.828 0 1.5.672 1.5 1.5v10.5a1.5 1.5 0 0 1-1.5 1.5H3.75a1.5 1.5 0 0 1-1.5-1.5V6.75Zm1.5 0 8.25 6.75 8.25-6.75" />
+          </svg>
+          {!sidebarCollapsed && "Contact support"}
+        </a>
         <button onClick={signOut} className={cn("btn-signout-premium flex items-center justify-center gap-2", sidebarCollapsed ? "px-0 py-2.5" : "")} title="Sign Out">
           {sidebarCollapsed ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-5 w-5">
@@ -421,7 +434,16 @@ export function AppShell({
             <nav className="flex-1 overflow-y-auto px-3 pb-4">
               <NavLinks items={items} pathname={pathname} onNavigate={() => setMobileNavOpen(false)} />
             </nav>
-            <div className="p-4 border-t border-[var(--divider)]">
+            <div className="p-4 border-t border-[var(--divider)] flex flex-col gap-2">
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="flex items-center justify-center gap-2 text-[13px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] decoration-none py-1.5"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0-.828.672-1.5 1.5-1.5h16.5c.828 0 1.5.672 1.5 1.5v10.5a1.5 1.5 0 0 1-1.5 1.5H3.75a1.5 1.5 0 0 1-1.5-1.5V6.75Zm1.5 0 8.25 6.75 8.25-6.75" />
+                </svg>
+                Contact support
+              </a>
               <button
                 onClick={signOut}
                 className="btn-signout-premium"

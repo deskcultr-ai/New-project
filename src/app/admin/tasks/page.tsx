@@ -268,7 +268,7 @@ export default function AdminTasksPage() {
                         {" → "}
                         <span className="font-semibold text-emerald-400">{personDisplayName(req.forward_to)}</span>
                       </p>
-                      <p className="mt-2 text-xs text-[var(--text-secondary)] italic">"{req.reason}"</p>
+                      <p className="mt-2 text-xs text-[var(--text-secondary)] italic">&quot;{req.reason}&quot;</p>
                       {req.status === "pending" && (
                         <div className="mt-3 space-y-2">
                           <Input
