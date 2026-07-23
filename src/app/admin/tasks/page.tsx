@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
-import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
+import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, TASK_TYPE_LABEL, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority, type TaskType } from "@/lib/tasks";
 
 type Department = { id: string; name: string };
 type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string; department_id: string | null; manager_id: string | null };
@@ -38,6 +38,7 @@ export default function AdminTasksPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [taskType, setTaskType] = useState<TaskType>("one_time");
   const [dueDate, setDueDate] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
@@ -52,6 +53,7 @@ export default function AdminTasksPage() {
   const [search, setSearch] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
+  const [filterTaskType, setFilterTaskType] = useState("");
   const [filterOverdue, setFilterOverdue] = useState(false);
 
   const load = useCallback(async () => {
@@ -116,6 +118,7 @@ export default function AdminTasksPage() {
       title: title.trim(),
       description: description.trim() || null,
       priority,
+      task_type: taskType,
       due_date: dueDate || null,
       created_by: profile.id,
       assigned_to: assigneeId || null,
@@ -130,6 +133,7 @@ export default function AdminTasksPage() {
     setTitle("");
     setDescription("");
     setPriority("medium");
+    setTaskType("one_time");
     setDueDate("");
     setAssigneeId("");
     load();
@@ -178,14 +182,16 @@ export default function AdminTasksPage() {
     if (searchLower && !t.title.toLowerCase().includes(searchLower) && !(t.description ?? "").toLowerCase().includes(searchLower)) return false;
     if (filterAssignee === "__unassigned__" ? t.assigned_to !== null : filterAssignee && t.assigned_to !== filterAssignee) return false;
     if (filterPriority && t.priority !== filterPriority) return false;
+    if (filterTaskType && t.task_type !== filterTaskType) return false;
     if (filterOverdue && getDueUrgency(t.due_date, t.status) !== "overdue") return false;
     return true;
   });
-  const hasFilters = !!(search || filterAssignee || filterPriority || filterOverdue);
+  const hasFilters = !!(search || filterAssignee || filterPriority || filterTaskType || filterOverdue);
   function clearFilters() {
     setSearch("");
     setFilterAssignee("");
     setFilterPriority("");
+    setFilterTaskType("");
     setFilterOverdue(false);
   }
 
@@ -238,6 +244,14 @@ export default function AdminTasksPage() {
                   <option value="">Unassigned</option>
                   {assignees.map((p) => (
                     <option key={p.id} value={p.id}>{p.username ? `@${p.username}` : p.full_name || p.email} ({p.role})</option>
+                  ))}
+                </Select>
+              </label>
+              <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                Task type
+                <Select value={taskType} onChange={(e) => setTaskType(e.target.value as TaskType)} className="mt-2">
+                  {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
                   ))}
                 </Select>
               </label>
@@ -341,6 +355,15 @@ export default function AdminTasksPage() {
                 ))}
               </Select>
             </label>
+            <label className="text-sm font-semibold text-[var(--text-secondary)]">
+              Task type
+              <Select value={filterTaskType} onChange={(e) => setFilterTaskType(e.target.value)} className="mt-2 w-44">
+                <option value="">Any type</option>
+                {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
+            </label>
             <label className="flex h-11 items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]">
               <input type="checkbox" checked={filterOverdue} onChange={(e) => setFilterOverdue(e.target.checked)} className="h-4 w-4 rounded accent-primary" />
               Overdue only
@@ -376,6 +399,7 @@ export default function AdminTasksPage() {
                       <p className="mt-2 text-xs text-[var(--text-secondary)]">{personName(task.assigned_to)} · {deptName(task.department_id)}</p>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+                        {task.task_type === "daily_recurring" && <Badge tone="info">🔁 Daily</Badge>}
                         {urgency && <Badge tone={DUE_URGENCY_TONE[urgency]}>{DUE_URGENCY_LABEL[urgency]}</Badge>}
                         {task.due_date && <span className="text-xs text-[var(--text-tertiary)]">{new Date(task.due_date).toLocaleDateString()}</span>}
                       </div>

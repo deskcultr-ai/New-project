@@ -1,5 +1,6 @@
 export type TaskStatus = "todo" | "in_progress" | "in_review" | "done";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+export type TaskType = "one_time" | "daily_recurring";
 
 export type Task = {
   id: string;
@@ -10,11 +11,17 @@ export type Task = {
   status: TaskStatus;
   is_blocked: boolean;
   priority: TaskPriority;
+  task_type: TaskType;
   due_date: string | null;
   created_by: string | null;
   assigned_to: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export const TASK_TYPE_LABEL: Record<TaskType, string> = {
+  one_time: "One-time",
+  daily_recurring: "Daily Recurring",
 };
 
 export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "in_review", "done"];

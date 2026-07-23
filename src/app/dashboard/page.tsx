@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { getProfile, displayName, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Badge, Input, Select, Alert } from "@/components/ui";
-import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
+import { STATUS_LABEL, PRIORITY_LABEL, PRIORITY_TONE, TASK_TYPE_LABEL, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority, type TaskType } from "@/lib/tasks";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newPriority, setNewPriority] = useState<TaskPriority>("medium");
+  const [newTaskType, setNewTaskType] = useState<TaskType>("one_time");
   const [newDueDate, setNewDueDate] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -67,6 +68,7 @@ export default function DashboardPage() {
       title: newTitle.trim(),
       description: newDescription.trim() || null,
       priority: newPriority,
+      task_type: newTaskType,
       due_date: newDueDate || null,
       created_by: profile.id,
       assigned_to: profile.id,
@@ -80,6 +82,7 @@ export default function DashboardPage() {
     setNewTitle("");
     setNewDescription("");
     setNewPriority("medium");
+    setNewTaskType("one_time");
     setNewDueDate("");
     load();
   }
@@ -113,6 +116,11 @@ export default function DashboardPage() {
                   <option key={value} value={value}>{label}</option>
                 ))}
               </Select>
+              <Select value={newTaskType} onChange={(e) => setNewTaskType(e.target.value as TaskType)} className="w-44">
+                {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </Select>
               <Input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} className="w-44" />
               <Button type="submit" disabled={createBusy || !newTitle.trim()}>
                 {createBusy ? "Creating..." : "Create task"}
@@ -139,6 +147,7 @@ export default function DashboardPage() {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
                 <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+                {task.task_type === "daily_recurring" && <Badge tone="info">🔁 Daily</Badge>}
                 {urgency && <Badge tone={DUE_URGENCY_TONE[urgency]}>{DUE_URGENCY_LABEL[urgency]}</Badge>}
                 {task.due_date && <span className="text-xs text-slate-400">Due {new Date(task.due_date).toLocaleDateString()}</span>}
               </div>

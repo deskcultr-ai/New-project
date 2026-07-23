@@ -119,6 +119,9 @@ a **New task** form:
 - Title, Due date, Description
 - **Department** — required, any department in the org
 - Priority (Low/Medium/High/Urgent)
+- **Task type** — One-time or Daily Recurring. Purely a label/filter — it
+  doesn't regenerate or reset anything automatically; anyone who can edit a
+  task's priority can also change its type later.
 - **Assign to** — any **Team Leader, Manager, or Executive** in the org
   (Organization Super Admin can assign across every department, not just
   one)
@@ -257,9 +260,9 @@ Lands on `/dashboard` — deliberately the simplest screen in the app. Left
 nav: **My Tasks · Messages · Drive** (no admin section at all).
 
 ### `/dashboard` — My Tasks
-A "New task" form at the top (Title, Description, Priority, Due date) lets
-an Executive create a task **for themselves** — department and assignee are
-fixed to their own, hidden from the form. Below it, a flat list of every
+A "New task" form at the top (Title, Description, Priority, Task type, Due
+date) lets an Executive create a task **for themselves** — department and
+assignee are fixed to their own, hidden from the form. Below it, a flat list of every
 task **assigned to them** (self-created or assigned by someone else),
 sorted by due date then priority. Each card shows title, description
 preview, Blocked badge if applicable, status, priority, and due date.

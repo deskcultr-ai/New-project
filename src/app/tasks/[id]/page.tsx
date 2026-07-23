@@ -8,7 +8,7 @@ import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
-import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
+import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, TASK_TYPE_LABEL, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type TaskStatus, type TaskPriority, type TaskType } from "@/lib/tasks";
 
 type PersonRef = { id: string; full_name: string | null; username?: string | null; email: string } | null;
 type TaskDetail = {
@@ -20,6 +20,7 @@ type TaskDetail = {
   status: TaskStatus;
   is_blocked: boolean;
   priority: TaskPriority;
+  task_type: TaskType;
   due_date: string | null;
   assigned_to: string | null;
   created_by: string;
@@ -70,6 +71,7 @@ export default function TaskDetailPage() {
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [isBlocked, setIsBlocked] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [taskType, setTaskType] = useState<TaskType>("one_time");
   const [assigneeId, setAssigneeId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -106,7 +108,7 @@ export default function TaskDetailPage() {
       supabase
         .from("tasks")
         .select(
-          "id, organization_id, department_id, title, description, status, is_blocked, priority, due_date, assigned_to, created_by, department:departments(name), assignee:profiles!tasks_assigned_to_fkey(id,full_name,username,email), creator:profiles!tasks_created_by_fkey(id,full_name,username,email)"
+          "id, organization_id, department_id, title, description, status, is_blocked, priority, task_type, due_date, assigned_to, created_by, department:departments(name), assignee:profiles!tasks_assigned_to_fkey(id,full_name,username,email), creator:profiles!tasks_created_by_fkey(id,full_name,username,email)"
         )
         .eq("id", params.id)
         .maybeSingle(),
@@ -133,6 +135,7 @@ export default function TaskDetailPage() {
     setStatus(detail.status);
     setIsBlocked(detail.is_blocked);
     setPriority(detail.priority);
+    setTaskType(detail.task_type);
     setAssigneeId(detail.assigned_to ?? "");
     setTitle(detail.title);
     setDescription(detail.description ?? "");
@@ -177,12 +180,14 @@ export default function TaskDetailPage() {
     const patch: Record<string, unknown> = { status, is_blocked: isBlocked };
     if (canEditFully) {
       patch.priority = priority;
+      patch.task_type = taskType;
       patch.assigned_to = assigneeId || null;
     }
     if (canEditOwnTask) {
       patch.title = title.trim();
       patch.description = description.trim() || null;
       patch.priority = priority;
+      patch.task_type = taskType;
       patch.due_date = dueDate || null;
     }
 
@@ -308,6 +313,7 @@ export default function TaskDetailPage() {
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>
+              {task.task_type === "daily_recurring" && <Badge tone="info">🔁 Daily</Badge>}
               {task.is_blocked && <Badge tone="danger">Blocked</Badge>}
               <Badge tone="neutral">{STATUS_LABEL[task.status]}</Badge>
               {(() => {
@@ -366,6 +372,14 @@ export default function TaskDetailPage() {
                       ))}
                     </Select>
                   </label>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                    Task type
+                    <Select value={taskType} onChange={(e) => setTaskType(e.target.value as TaskType)} className="mt-2">
+                      {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </Select>
+                  </label>
                 </>
               )}
               {canEditOwnTask && (
@@ -394,6 +408,14 @@ export default function TaskDetailPage() {
                   <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                     Due date
                     <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="mt-2" />
+                  </label>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                    Task type
+                    <Select value={taskType} onChange={(e) => setTaskType(e.target.value as TaskType)} className="mt-2">
+                      {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </Select>
                   </label>
                 </>
               )}
