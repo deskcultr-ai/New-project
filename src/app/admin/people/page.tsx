@@ -14,11 +14,18 @@ type PersonStatus = {
   email: string;
   full_name: string | null;
   username: string | null;
-  role: "super_admin" | "admin" | "employee";
+  role: "org_super_admin" | "team_leader" | "manager" | "executive";
   department_id: string | null;
   invited_at: string | null;
   confirmed_at: string | null;
 };
+
+function roleBadgeTone(role: PersonStatus["role"]): "primary" | "info" | "warning" | "neutral" {
+  if (role === "org_super_admin") return "primary";
+  if (role === "team_leader") return "info";
+  if (role === "manager") return "warning";
+  return "neutral";
+}
 
 function personSubtitle(person: PersonStatus): string {
   return person.username ? `@${person.username}` : person.email;
@@ -43,6 +50,7 @@ export default function AdminPeoplePage() {
 
   const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteDeptId, setInviteDeptId] = useState("");
+  const [inviteRole, setInviteRole] = useState<"manager" | "executive">("executive");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
@@ -54,7 +62,7 @@ export default function AdminPeoplePage() {
       router.replace("/login");
       return;
     }
-    if (me.role === "employee") {
+    if (me.role === "executive") {
       router.replace("/dashboard");
       return;
     }
@@ -63,7 +71,7 @@ export default function AdminPeoplePage() {
 
     const { data: depts } = await supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name");
     setDepartments(depts ?? []);
-    if (me.role === "admin" && me.department_id) setInviteDeptId(me.department_id);
+    if ((me.role === "team_leader" || me.role === "manager") && me.department_id) setInviteDeptId(me.department_id);
 
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
@@ -148,7 +156,7 @@ export default function AdminPeoplePage() {
     setInviteError("");
     setInviteNotice("");
 
-    const role = profile.role === "super_admin" ? "admin" : "employee";
+    const role = profile.role === "org_super_admin" ? "team_leader" : profile.role === "team_leader" ? inviteRole : "executive";
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) {
@@ -196,11 +204,13 @@ export default function AdminPeoplePage() {
         <Card>
           <h2 className="text-base font-bold text-[var(--text-primary)]">Departments</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {profile.role === "super_admin"
+            {profile.role === "org_super_admin"
               ? "Create the departments your organization is split into. Click any department to see its people, tasks, and activity."
+              : profile.role === "manager"
+              ? "Your department. Click it to see its people, tasks, and activity."
               : "Every department in your organization. Click one to see its people, tasks, and activity."}
           </p>
-          {profile.role === "super_admin" && (
+          {profile.role === "org_super_admin" && (
             <form onSubmit={createDepartment} className="mt-4 flex gap-3">
               <Input value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} placeholder="e.g. Marketing" className="flex-1" />
               <Button type="submit" disabled={deptBusy || !newDeptName.trim()}>
@@ -211,9 +221,9 @@ export default function AdminPeoplePage() {
           {deptError && <Alert tone="danger" className="mt-3">{deptError}</Alert>}
           {deleteError && <Alert tone="danger" className="mt-3">{deleteError}</Alert>}
 
-          {/* Grid of Department Cards */}
+          {/* Grid of Department Cards -- Manager only ever sees their own department */}
           <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {departments.map((d, index) => {
+            {(profile.role === "manager" ? departments.filter((d) => d.id === profile.department_id) : departments).map((d, index) => {
               const deptMembers = people.filter((p) => p.department_id === d.id);
               const gradients = [
                 "linear-gradient(135deg,#818cf8,#6366f1)",
@@ -242,7 +252,7 @@ export default function AdminPeoplePage() {
                         </p>
                       </div>
                     </div>
-                    {profile.role === "super_admin" && (
+                    {profile.role === "org_super_admin" && (
                       <button
                         type="button"
                         onClick={(e) => deleteDepartment(d.id, e)}
@@ -258,7 +268,9 @@ export default function AdminPeoplePage() {
                 </div>
               );
             })}
-            {departments.length === 0 && <p className="text-sm text-[var(--text-tertiary)] col-span-full py-4 text-center">No departments yet.</p>}
+            {(profile.role === "manager" ? departments.filter((d) => d.id === profile.department_id) : departments).length === 0 && (
+              <p className="text-sm text-[var(--text-tertiary)] col-span-full py-4 text-center">No departments yet.</p>
+            )}
           </div>
         </Card>
 
@@ -269,30 +281,42 @@ export default function AdminPeoplePage() {
             <>
               <Card>
                 <h2 className="text-base font-bold text-[var(--text-primary)]">
-                  Invite {profile.role === "super_admin" ? "Admins" : "Employees"}
+                  Invite {profile.role === "org_super_admin" ? "Team Leaders" : profile.role === "team_leader" ? "Managers or Executives" : "Executives"}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                  {profile.role === "super_admin"
-                    ? "Add email addresses and send invites to multiple admins at once."
+                  {profile.role === "org_super_admin"
+                    ? "Add email addresses and send invites to multiple Team Leaders at once."
                     : `Add email addresses and send invites to join ${deptName(profile.department_id)}.`}
                 </p>
                 <form onSubmit={sendInvite} className="mt-4 space-y-3">
                   <EmailChipsInput
                     emails={inviteEmails}
                     onChange={setInviteEmails}
-                    placeholder={profile.role === "super_admin" ? "Add admin email addresses..." : "Add employee email addresses..."}
+                    placeholder={
+                      profile.role === "org_super_admin"
+                        ? "Add Team Leader email addresses..."
+                        : profile.role === "team_leader"
+                        ? `Add ${inviteRole === "manager" ? "manager" : "executive"} email addresses...`
+                        : "Add executive email addresses..."
+                    }
                     disabled={inviteBusy}
                   />
                   <p className="text-xs text-[var(--text-tertiary)]">Type an email and press Enter, Tab, Space, or comma to add it. Paste multiple emails at once.</p>
                   <div className="flex flex-wrap gap-3 items-center">
-                    {profile.role === "super_admin" ? (
+                    {profile.role === "org_super_admin" && (
                       <Select value={inviteDeptId} onChange={(e) => setInviteDeptId(e.target.value)} className="w-56">
                         <option value="">Select department</option>
                         {departments.map((d) => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
                       </Select>
-                    ) : null}
+                    )}
+                    {profile.role === "team_leader" && (
+                      <Select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "manager" | "executive")} className="w-44">
+                        <option value="executive">As Executive</option>
+                        <option value="manager">As Manager</option>
+                      </Select>
+                    )}
                     <Button type="submit" disabled={inviteBusy || inviteEmails.length === 0 || !inviteDeptId}>
                       {inviteBusy ? `Sending ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}...` : `Send ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}`}
                     </Button>
@@ -303,15 +327,17 @@ export default function AdminPeoplePage() {
               </Card>
 
               <Card>
-                <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "super_admin" ? "Org directory" : "Your team"}</h2>
-                {profile.role === "admin" && (
+                <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "org_super_admin" ? "Org directory" : "Your team"}</h2>
+                {(profile.role === "team_leader" || profile.role === "manager") && (
                   <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    Your own department. Click any department card above to see people in other departments.
+                    {profile.role === "team_leader"
+                      ? "Your own department. Click any department card above to see people in other departments."
+                      : "Your own department."}
                   </p>
                 )}
                 <div className="mt-4 space-y-3">
                   {(() => {
-                    const visiblePeople = profile.role === "admin" ? people.filter((p) => p.department_id === profile.department_id) : people;
+                    const visiblePeople = profile.role === "manager" ? people.filter((p) => p.department_id === profile.department_id) : people;
                     if (visiblePeople.length === 0) return <p className="text-sm text-[var(--text-tertiary)]">Nobody here yet.</p>;
                     return visiblePeople.map((person) => (
                       <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
@@ -321,8 +347,8 @@ export default function AdminPeoplePage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
-                          <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
-                            {person.role.replace("_", " ")}
+                          <Badge tone={roleBadgeTone(person.role)}>
+                            {person.role.replaceAll("_", " ")}
                           </Badge>
                         </div>
                       </div>

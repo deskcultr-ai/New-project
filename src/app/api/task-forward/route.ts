@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getBearerUser } from "@/lib/auth-server";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
 
-// GET: Admin/SuperAdmin fetches pending forward requests for their scope
+// GET: Team Leader/Manager/Org Super Admin fetches pending forward requests for their scope
 export async function GET(request: Request) {
   const bearer = await getBearerUser(request);
   if (!bearer) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -12,8 +12,8 @@ export async function GET(request: Request) {
     .eq("id", bearer.user.id)
     .maybeSingle();
 
-  if (!caller || caller.role === "employee") {
-    return NextResponse.json({ error: "Only admins can view forward requests." }, { status: 403 });
+  if (!caller || caller.role === "executive") {
+    return NextResponse.json({ error: "Only leads can view forward requests." }, { status: 403 });
   }
 
   const query = bearer.userClient
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ requests: data ?? [] });
 }
 
-// POST: Employee creates a forward request
+// POST: Executive creates a forward request
 export async function POST(request: Request) {
   const bearer = await getBearerUser(request);
   if (!bearer) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -54,8 +54,8 @@ export async function POST(request: Request) {
     .eq("id", bearer.user.id)
     .maybeSingle();
 
-  if (!caller || caller.role !== "employee") {
-    return NextResponse.json({ error: "Only employees can request task forwarding." }, { status: 403 });
+  if (!caller || caller.role !== "executive") {
+    return NextResponse.json({ error: "Only executives can request task forwarding." }, { status: 403 });
   }
 
   // Verify task is assigned to this employee
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
-// PATCH: Admin approves or rejects a forward request
+// PATCH: Team Leader/Manager/Org Super Admin approves or rejects a forward request
 export async function PATCH(request: Request) {
   const bearer = await getBearerUser(request);
   if (!bearer) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -113,8 +113,8 @@ export async function PATCH(request: Request) {
     .eq("id", bearer.user.id)
     .maybeSingle();
 
-  if (!caller || caller.role === "employee") {
-    return NextResponse.json({ error: "Only admins can review forward requests." }, { status: 403 });
+  if (!caller || caller.role === "executive") {
+    return NextResponse.json({ error: "Only leads can review forward requests." }, { status: 403 });
   }
 
   // Use admin client to bypass the tasks_guard_update trigger (the trigger on task_forward_requests handles reassignment via SECURITY DEFINER)

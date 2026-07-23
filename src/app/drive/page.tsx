@@ -35,11 +35,14 @@ export default function DriveOverviewPage() {
 
       const { data: depts } = await supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name");
       const allDepts = (depts ?? []) as Department[];
-      setDepartments(me.role === "super_admin" ? allDepts : allDepts.filter((d) => d.id === me.department_id));
+      setDepartments(me.role === "org_super_admin" ? allDepts : allDepts.filter((d) => d.id === me.department_id));
 
-      if (me.role !== "employee") {
+      // Team personal folders (oversight) are only visible to Org Super Admin
+      // (org-wide) and Team Leader (own department) -- Manager deliberately
+      // has no personal-folder oversight, same as Executive.
+      if (me.role === "org_super_admin" || me.role === "team_leader") {
         const query = supabase.from("profiles").select("id, full_name, email").eq("organization_id", me.organization_id).neq("id", me.id);
-        const { data: people } = me.role === "admin" ? await query.eq("department_id", me.department_id) : await query;
+        const { data: people } = me.role === "team_leader" ? await query.eq("department_id", me.department_id) : await query;
         setTeam((people ?? []) as Person[]);
       }
 
@@ -82,7 +85,7 @@ export default function DriveOverviewPage() {
           </div>
         </div>
 
-        {profile.role !== "employee" && (
+        {(profile.role === "org_super_admin" || profile.role === "team_leader") && (
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--text-tertiary)]">Team personal folders</h2>
             <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -28,7 +28,7 @@ export default function AdminSettingsPage() {
         router.replace("/login");
         return;
       }
-      if (me.role !== "super_admin") {
+      if (me.role !== "org_super_admin") {
         router.replace("/admin");
         return;
       }

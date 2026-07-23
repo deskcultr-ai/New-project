@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { email?: string; emails?: string[]; role?: "admin" | "employee"; departmentId?: string }
+    | { email?: string; emails?: string[]; role?: "team_leader" | "manager" | "executive"; departmentId?: string }
     | null;
 
   // Support both single email and bulk emails array
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
   if (emails.length === 0) {
     return NextResponse.json({ error: "Enter at least one valid email address." }, { status: 400 });
   }
-  if (role !== "admin" && role !== "employee") {
-    return NextResponse.json({ error: "role must be 'admin' or 'employee'." }, { status: 400 });
+  if (role !== "team_leader" && role !== "manager" && role !== "executive") {
+    return NextResponse.json({ error: "role must be 'team_leader', 'manager', or 'executive'." }, { status: 400 });
   }
   if (!departmentId) {
     return NextResponse.json({ error: "departmentId is required." }, { status: 400 });
@@ -61,16 +61,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not resolve your profile." }, { status: 403 });
   }
 
-  // Super Admin creates/invites Admins to any department in the org.
-  // Admin invites Employees, scoped to their own department only.
-  if (role === "admin" && callerProfile.role !== "super_admin") {
-    return NextResponse.json({ error: "Only a Super Admin can invite an Admin." }, { status: 403 });
+  // Org Super Admin invites Team Leaders to any department in the org.
+  // Team Leader invites Managers or Executives, scoped to their own department.
+  // Manager invites Executives, scoped to their own department.
+  if (role === "team_leader" && callerProfile.role !== "org_super_admin") {
+    return NextResponse.json({ error: "Only an Organization Super Admin can invite a Team Leader." }, { status: 403 });
   }
-  if (role === "employee" && callerProfile.role !== "admin") {
-    return NextResponse.json({ error: "Only an Admin can invite an Employee." }, { status: 403 });
+  if (role === "manager" && callerProfile.role !== "team_leader") {
+    return NextResponse.json({ error: "Only a Team Leader can invite a Manager." }, { status: 403 });
   }
-  if (role === "employee" && departmentId !== callerProfile.department_id) {
-    return NextResponse.json({ error: "You can only invite employees into your own department." }, { status: 403 });
+  if (role === "executive" && !["team_leader", "manager"].includes(callerProfile.role)) {
+    return NextResponse.json({ error: "Only a Team Leader or Manager can invite an Executive." }, { status: 403 });
+  }
+  if ((role === "manager" || role === "executive") && departmentId !== callerProfile.department_id) {
+    return NextResponse.json({ error: "You can only invite into your own department." }, { status: 403 });
   }
 
   // Confirm the target department actually belongs to the caller's org

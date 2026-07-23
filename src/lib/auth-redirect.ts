@@ -33,7 +33,7 @@ export async function getPostAuthRedirect() {
     return isPlatformOwner(user.email) ? "/platform-admin/requests" : "/login";
   }
 
-  return ["super_admin", "admin"].includes(profile.role) ? "/admin" : "/dashboard";
+  return ["org_super_admin", "team_leader", "manager"].includes(profile.role) ? "/admin" : "/dashboard";
 }
 
 /**

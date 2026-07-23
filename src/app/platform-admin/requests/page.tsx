@@ -97,7 +97,7 @@ export default function PlatformAdminRequestsPage() {
     }
 
     if (action === "approve") {
-      setNotice(result.emailSent ? "Approved — the Super Admin claim invite was emailed." : `Approved, but the invite email failed to send: ${result.emailError}`);
+      setNotice(result.emailSent ? "Approved — the Organization Super Admin claim invite was emailed." : `Approved, but the invite email failed to send: ${result.emailError}`);
     } else {
       setNotice("Request rejected.");
     }
@@ -108,7 +108,7 @@ export default function PlatformAdminRequestsPage() {
   async function deleteRequest(requestId: string, status: OrgRequest["status"]) {
     const confirmMessage =
       status === "approved"
-        ? "This organization is live. Deleting it will permanently remove the org, every person in it (Super Admin, Admins, Employees -- nobody will be able to log in again), all their tasks/messages/files, and this request. They'd need to submit a brand new request to get back in. Continue?"
+        ? "This organization is live. Deleting it will permanently remove the org, every person in it (Organization Super Admin, Team Leaders, Managers, Executives -- nobody will be able to log in again), all their tasks/messages/files, and this request. They'd need to submit a brand new request to get back in. Continue?"
         : "Are you sure you want to delete this request permanently?";
     if (!window.confirm(confirmMessage)) return;
     setBusyId(requestId);
@@ -163,7 +163,7 @@ export default function PlatformAdminRequestsPage() {
     <main className="min-h-screen bg-[var(--background)] px-6 py-10">
       <div className="mx-auto max-w-4xl">
         <h1 className="text-2xl font-black tracking-tight text-[var(--text-primary)]">Organization requests</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Approve a request to create the organization and email its Super Admin claim invite.</p>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Approve a request to create the organization and email its Organization Super Admin claim invite.</p>
 
         {notice && <Alert tone="success" className="mt-4">{notice}</Alert>}
         {error && <Alert tone="danger" className="mt-4">{error}</Alert>}

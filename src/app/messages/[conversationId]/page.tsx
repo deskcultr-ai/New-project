@@ -318,7 +318,7 @@ export default function ConversationPage() {
     );
   }
 
-  const canPost = conversationType !== "announcement" || profile.role === "super_admin";
+  const canPost = conversationType !== "announcement" || profile.role === "org_super_admin";
 
   return (
     <div className="flex h-full">
@@ -346,7 +346,7 @@ export default function ConversationPage() {
 
         <div className="border-t border-[var(--divider)] p-3">
           {!canPost ? (
-            <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Super Admin can post to Announcements.</p>
+            <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Organization Super Admin can post to Announcements.</p>
           ) : (
             <form onSubmit={sendMessage} className="space-y-2">
               <div className="relative">

@@ -9,7 +9,7 @@ import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
 
 type Department = { id: string; name: string };
-type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string };
+type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string; department_id: string | null };
 type ForwardRequest = {
   id: string;
   task_id: string;
@@ -60,23 +60,30 @@ export default function AdminTasksPage() {
       router.replace("/login");
       return;
     }
-    if (me.role === "employee") {
+    if (me.role === "executive") {
       router.replace("/dashboard");
       return;
     }
     setProfile(me);
     sessionStorage.setItem("user_profile", JSON.stringify(me));
-    if (me.role === "admin" && me.department_id) setDepartmentId(me.department_id);
+    if ((me.role === "team_leader" || me.role === "manager") && me.department_id) setDepartmentId(me.department_id);
 
     const [{ data: depts }, { data: people }, { data: taskRows }] = await Promise.all([
       supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name"),
-      supabase.from("profiles").select("id, full_name, username, email, role").order("full_name"),
+      supabase.from("profiles").select("id, full_name, username, email, role, department_id").order("full_name"),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
     ]);
 
     setDepartments(depts ?? []);
-    const eligibleRoles = me.role === "super_admin" ? ["admin", "employee"] : ["employee"];
-    setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => eligibleRoles.includes(p.role)));
+    // Org Super Admin assigns to anyone; Team Leader assigns to Manager/Executive;
+    // Manager assigns to Executives in their own department only.
+    const eligibleRoles =
+      me.role === "org_super_admin" ? ["team_leader", "manager", "executive"] : me.role === "team_leader" ? ["manager", "executive"] : ["executive"];
+    setAssignees(
+      ((people ?? []) as DirectoryPerson[]).filter(
+        (p) => eligibleRoles.includes(p.role) && (me.role !== "manager" || p.department_id === me.department_id)
+      )
+    );
     setTasks((taskRows ?? []) as Task[]);
 
     // Load pending forward requests
@@ -210,9 +217,9 @@ export default function AdminTasksPage() {
             <div className="grid gap-4 sm:grid-cols-3">
               <label className="block text-sm font-semibold text-[var(--text-secondary)]">
                 Department
-                <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="mt-2">
+                <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} disabled={profile.role === "manager"} className="mt-2">
                   <option value="">Select department</option>
-                  {departments.map((d) => (
+                  {(profile.role === "manager" ? departments.filter((d) => d.id === profile.department_id) : departments).map((d) => (
                     <option key={d.id} value={d.id}>{d.name}</option>
                   ))}
                 </Select>

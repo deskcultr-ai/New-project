@@ -39,7 +39,7 @@ export default function DepartmentDrivePage() {
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [taskAttachments, setTaskAttachments] = useState<Record<string, TaskAttachment[]>>({});
 
-  const canWriteResources = profile?.role === "super_admin" || (profile?.role === "admin" && profile.department_id === params.departmentId);
+  const canWriteResources = profile?.role === "org_super_admin" || (profile?.role === "team_leader" && profile.department_id === params.departmentId);
 
   const preview = useFilePreview();
 

@@ -9,11 +9,18 @@ export type Profile = {
   username: string | null;
   bio: string | null;
   avatar_url: string | null;
-  role: "super_admin" | "admin" | "employee";
+  role: "org_super_admin" | "team_leader" | "manager" | "executive";
   status: "active" | "disabled";
 };
 
 const PROFILE_COLUMNS = "id, organization_id, department_id, email, full_name, username, bio, avatar_url, role, status";
+
+export const ROLE_LABEL: Record<Profile["role"], string> = {
+  org_super_admin: "Organization Super Admin",
+  team_leader: "Team Leader",
+  manager: "Manager",
+  executive: "Executive",
+};
 
 /** Current signed-in profile, or null when signed out / no profile row. */
 export async function getProfile(): Promise<Profile | null> {
@@ -27,12 +34,23 @@ export async function getProfile(): Promise<Profile | null> {
   return (data as Profile) ?? null;
 }
 
+/** True for anyone above Executive: Org Super Admin, Team Leader, or Manager. */
 export function isAdmin(profile: Profile | null): boolean {
-  return !!profile && ["super_admin", "admin"].includes(profile.role);
+  return !!profile && ["org_super_admin", "team_leader", "manager"].includes(profile.role);
 }
 
 export function isSuperAdmin(profile: Profile | null): boolean {
-  return !!profile && profile.role === "super_admin";
+  return !!profile && profile.role === "org_super_admin";
+}
+
+/** Team Leader or Manager -- has task-authority over Executives in their own department. */
+export function isManagerOrAbove(profile: Profile | null): boolean {
+  return !!profile && ["org_super_admin", "team_leader", "manager"].includes(profile.role);
+}
+
+/** Org Super Admin or Team Leader -- can create departments, invite Team Leaders/Managers, and write department resources. */
+export function canManageDepartment(profile: Profile | null): boolean {
+  return !!profile && ["org_super_admin", "team_leader"].includes(profile.role);
 }
 
 /** Returns username (if set) → full_name → email prefix → "there" */

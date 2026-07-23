@@ -19,7 +19,7 @@ org request.
 4. **Approve**:
    - Creates the `organizations` row.
    - Calls Supabase Auth's `admin.inviteUserByEmail(work_email, { data:
-     { invite_role: 'super_admin', organization_id }, redirectTo:
+     { invite_role: 'org_super_admin', organization_id }, redirectTo:
      '.../auth/callback?next=/set-password' })`.
    - Marks the request `approved`.
 
@@ -28,17 +28,18 @@ org request.
 This is the one thing that changed from the original design: instead of
 generating our own token and calling Resend's HTTP API directly, invites
 now go through Supabase Auth's native invite mechanism for every invite
-type (Super Admin claim, Admin, Employee).
+type (Organization Super Admin claim, Team Leader, Manager, Executive).
 
 - Supabase creates the `auth.users` row **immediately** — at send time, not
   when the link is clicked — with our org/department/role data attached as
   `user_metadata`.
 - A database trigger, `handle_new_invited_user()` (in
-  `supabase/migrations/20260720000011_native_invites.sql`), fires on that
+  `supabase/migrations/20260720000011_native_invites.sql`, updated for the
+  4-tier hierarchy in `20260723000001_rbac_manager_tier.sql`), fires on that
   insert and creates the matching `profiles` row right away (and claims
-  `organizations.super_admin_id` if the invite was for a Super Admin).
-  This means the person "exists" in the system the moment you click
-  Approve/Send invite, before they've ever opened the email.
+  `organizations.org_super_admin_id` if the invite was for an Organization
+  Super Admin). This means the person "exists" in the system the moment you
+  click Approve/Send invite, before they've ever opened the email.
 - Supabase sends the email using its own **"Invite user"** template
   (Dashboard → Authentication → Emails → Templates), through whatever SMTP
   is configured (see Section 5 — this is not optional, see the warning
@@ -63,13 +64,16 @@ in) contains one link. Clicking it:
    code" — PRD explicitly allows OTP-only login, so a password was never
    required).
 5. Either path ends at `getPostAuthRedirect()` (`src/lib/auth-redirect.ts`),
-   which reads their `profiles` row and sends Super Admin/Admin to
-   `/admin`, Employee to `/dashboard`.
+   which reads their `profiles` row and sends Organization Super
+   Admin/Team Leader/Manager to `/admin`, Executive to `/dashboard`.
 
-Admin and Employee invites (sent from `/admin/people`, `POST
-/api/invites`) work identically — same trigger, same email template, same
-`/auth/callback → /set-password` path — just with `invite_role: 'admin'`
-or `'employee'` and a `department_id` in the metadata instead.
+Team Leader, Manager, and Executive invites (sent from `/admin/people`,
+`POST /api/invites`) work identically — same trigger, same email template,
+same `/auth/callback → /set-password` path — just with
+`invite_role: 'team_leader' | 'manager' | 'executive'` and a `department_id`
+in the metadata instead. Who can invite whom is enforced in the route itself:
+Organization Super Admin → Team Leader (any dept), Team Leader → Manager or
+Executive (own dept), Manager → Executive (own dept).
 
 ## 4. Login (existing accounts)
 
@@ -171,23 +175,26 @@ signs in via the **OTP tab**, not password:
    it on purpose (it's not part of any org, so it doesn't belong in the
    AppShell sidebar); it's a URL you go to directly, gated by the
    `PLATFORM_OWNER_EMAILS` check described in Section 1.
-4. Each pending request shows Approve/Reject. Approve fires the Super
-   Admin invite email (Section 2) to that request's work email.
+4. Each pending request shows Approve/Reject. Approve fires the
+   Organization Super Admin invite email (Section 2) to that request's work
+   email.
 
-## Walkthrough: how an Employee (or Admin) signs in
+## Walkthrough: how an Executive (or Team Leader/Manager) signs in
 
 Nobody signs up — every non-owner account starts as an invite:
 
-1. A Super Admin creates a department and invites an Admin to it, from
-   `/admin/people`. That Admin then invites Employees into their own
-   department from the same page.
+1. An Organization Super Admin creates a department and invites a Team
+   Leader to it, from `/admin/people`. That Team Leader then invites
+   Managers or Executives into their own department from the same page; a
+   Manager can in turn invite Executives into that same department.
 2. The invitee gets the "Invite user" email → clicks the link →
    `/auth/callback` → `/set-password` (Section 3) → sets a password or
    skips it.
 3. From then on they use `/login` like anyone else — either tab:
    **Password**, or **Email code** (OTP) if they skipped setting one.
-4. `getPostAuthRedirect()` sends Admins to `/admin`, Employees to
-   `/dashboard`, automatically, based on their `profiles.role`.
+4. `getPostAuthRedirect()` sends Organization Super Admin/Team
+   Leader/Manager to `/admin`, Executive to `/dashboard`, automatically,
+   based on their `profiles.role`.
 
 ## Notes on this pass's cleanup
 

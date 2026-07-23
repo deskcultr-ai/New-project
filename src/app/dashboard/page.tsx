@@ -26,7 +26,7 @@ export default function DashboardPage() {
         router.replace("/login");
         return;
       }
-      if (me.role !== "employee") {
+      if (me.role !== "executive") {
         router.replace("/admin");
         return;
       }

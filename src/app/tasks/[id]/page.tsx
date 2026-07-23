@@ -81,7 +81,7 @@ export default function TaskDetailPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
-  // Task forward (employee only)
+  // Task forward (executive only)
   const [forwardOpen, setForwardOpen] = useState(false);
   const [forwardQuery, setForwardQuery] = useState("");
   const [forwardTo, setForwardTo] = useState<DirectoryPerson | null>(null);
@@ -134,14 +134,17 @@ export default function TaskDetailPage() {
     setComments((commentRows ?? []) as unknown as Comment[]);
     setAttachments((attachmentRows ?? []) as unknown as Attachment[]);
 
-    if (me.role !== "employee") {
-      const { data: people } = await supabase.from("profiles").select("id, full_name, username, email, role").order("full_name");
-      const eligibleRoles = me.role === "super_admin" ? ["admin", "employee"] : ["employee"];
+    if (me.role !== "executive") {
+      // Org Super Admin/Team Leader browse the org-wide directory; Manager is
+      // scoped to their own department (matches org_people_status()'s scope).
+      const query = supabase.from("profiles").select("id, full_name, username, email, role").order("full_name");
+      const { data: people } = me.role === "manager" ? await query.eq("department_id", me.department_id ?? "") : await query;
+      const eligibleRoles = me.role === "org_super_admin" ? ["team_leader", "manager", "executive"] : me.role === "team_leader" ? ["manager", "executive"] : ["executive"];
       setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => eligibleRoles.includes(p.role)));
     } else {
-      // Employees need the dept directory to search for forward-to person
+      // Executives need the dept directory to search for forward-to person
       const { data: people } = await supabase.from("profiles").select("id, full_name, username, email, role").eq("department_id", me.department_id ?? "").order("full_name");
-      setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => p.role === "employee" && p.id !== me.id));
+      setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => p.role === "executive" && p.id !== me.id));
     }
 
     setLoading(false);
@@ -154,7 +157,7 @@ export default function TaskDetailPage() {
     run();
   }, [load]);
 
-  const canEditFully = profile?.role === "super_admin" || profile?.role === "admin";
+  const canEditFully = !!profile && ["org_super_admin", "team_leader", "manager"].includes(profile.role);
 
   async function saveTask(event: React.FormEvent) {
     event.preventDefault();
@@ -363,8 +366,8 @@ export default function TaskDetailPage() {
             </form>
           </Card>
 
-          {/* Request Reassignment — employees only, only when assigned to this task */}
-          {profile.role === "employee" && task.assigned_to === profile.id && (
+          {/* Request Reassignment — executives only, only when assigned to this task */}
+          {profile.role === "executive" && task.assigned_to === profile.id && (
             <Card>
               <h2 className="text-base font-bold text-[var(--text-primary)]">Request Reassignment</h2>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">You cannot reassign this task directly. Submit a request with a reason — your admin will review it.</p>

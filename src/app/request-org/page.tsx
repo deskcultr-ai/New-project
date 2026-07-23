@@ -76,7 +76,7 @@ export default function RequestOrgPage() {
               <h1 className="text-2xl font-extrabold tracking-tight text-slate-950">Request an organization</h1>
               <p className="mt-2 text-sm text-slate-600">
                 Tell us about your company. Once approved, we&apos;ll email the contact address an invite to become
-                your organization&apos;s Super Admin.
+                your organization&apos;s Organization Super Admin.
               </p>
 
               <form onSubmit={submit} className="mt-6 space-y-4">

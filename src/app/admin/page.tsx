@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { getProfile, type Profile } from "@/lib/session";
+import { getProfile, ROLE_LABEL, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 
 type TaskStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -102,12 +102,17 @@ export default function AdminOverviewPage() {
         router.replace("/login");
         return;
       }
-      if (me.role === "employee") {
+      if (me.role === "executive") {
         router.replace("/dashboard");
         return;
       }
       setProfile(me);
       sessionStorage.setItem("user_profile", JSON.stringify(me));
+
+      // Manager's stats are scoped to their own department; Org Super Admin
+      // and Team Leader keep the existing org-wide view (matches their RLS
+      // read scope on departments/profiles/tasks).
+      const scopeToOwnDept = me.role === "manager";
 
       // Fetch org details, departments, profiles, tasks, invites and notifications
       const [
@@ -119,9 +124,21 @@ export default function AdminOverviewPage() {
         { data: notifs },
       ] = await Promise.all([
         supabase.from("organizations").select("name").eq("id", me.organization_id).maybeSingle(),
-        supabase.from("departments").select("id, name").eq("organization_id", me.organization_id),
-        supabase.from("profiles").select("id, full_name, email, role, department_id").eq("organization_id", me.organization_id),
-        supabase.from("tasks").select("id, title, status, created_at, department_id").eq("organization_id", me.organization_id),
+        (() => {
+          let q = supabase.from("departments").select("id, name").eq("organization_id", me.organization_id);
+          if (scopeToOwnDept) q = q.eq("id", me.department_id ?? "");
+          return q;
+        })(),
+        (() => {
+          let q = supabase.from("profiles").select("id, full_name, email, role, department_id").eq("organization_id", me.organization_id);
+          if (scopeToOwnDept) q = q.eq("department_id", me.department_id ?? "");
+          return q;
+        })(),
+        (() => {
+          let q = supabase.from("tasks").select("id, title, status, created_at, department_id").eq("organization_id", me.organization_id);
+          if (scopeToOwnDept) q = q.eq("department_id", me.department_id ?? "");
+          return q;
+        })(),
         supabase.from("invites").select("id, email, role, department_id, created_at").eq("organization_id", me.organization_id).is("accepted_at", null).is("revoked_at", null),
         supabase.from("notifications").select("id").eq("profile_id", me.id).is("read_at", null),
       ]);
@@ -259,7 +276,7 @@ export default function AdminOverviewPage() {
           {
             id: "2",
             action: "member.invited",
-            details: { email: "team@deskculture.com", role: "employee" },
+            details: { email: "team@deskculture.com", role: "executive" },
             created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString(), // 45m ago
             actorName: me.full_name || me.email,
           },
@@ -329,7 +346,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
   return (
     <AppShell
       profile={profile}
-      title={`Welcome back, ${profile.full_name || "Super Admin"} 👑`}
+      title={`Welcome back, ${profile.full_name || ROLE_LABEL[profile.role]} 👑`}
       subtitle={`Here's what's happening in ${orgName || "your organization"}.`}
       actions={
         <div className="search-glass glass-panel mr-3">
@@ -754,7 +771,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         <div className="text-invite-email truncate">{inv.email}</div>
                         <div className="text-invite-dept truncate">{inv.departmentName}</div>
                       </div>
-                      <div className="pill-invite-role">{inv.role.replace("_", " ")}</div>
+                      <div className="pill-invite-role">{inv.role.replaceAll("_", " ")}</div>
                     </div>
                   ))
                 ) : (
@@ -806,7 +823,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     } else if (log.action === "member.invited") {
                       descText = (
                         <span>
-                          Invitation sent to <b>{log.details?.email}</b> as <b>{log.details?.role?.replace("_", " ")}</b> by <b>{log.actorName}</b>
+                          Invitation sent to <b>{log.details?.email}</b> as <b>{log.details?.role?.replaceAll("_", " ")}</b> by <b>{log.actorName}</b>
                         </span>
                       );
                       iconBg = "rgba(236,72,153,0.15)";
@@ -815,7 +832,7 @@ t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     } else if (log.action === "member.joined") {
                       descText = (
                         <span>
-                          User <b>{log.details?.email}</b> has joined the organization workspace as <b>{log.details?.role?.replace("_", " ")}</b>
+                          User <b>{log.details?.email}</b> has joined the organization workspace as <b>{log.details?.role?.replaceAll("_", " ")}</b>
                         </span>
                       );
                       iconBg = "rgba(34,197,94,0.15)";

@@ -14,7 +14,7 @@ type PersonStatus = {
   email: string;
   full_name: string | null;
   username: string | null;
-  role: "super_admin" | "admin" | "employee";
+  role: "org_super_admin" | "team_leader" | "manager" | "executive";
   department_id: string | null;
   invited_at: string | null;
   confirmed_at: string | null;
@@ -51,7 +51,7 @@ export default function DepartmentDetailPage() {
       router.replace("/login");
       return;
     }
-    if (me.role === "employee") {
+    if (me.role === "executive") {
       router.replace("/dashboard");
       return;
     }
@@ -120,7 +120,7 @@ export default function DepartmentDetailPage() {
       case "task.completed":
         return `Task "${log.details.title}" was completed`;
       case "member.joined":
-        return `${log.details.full_name || log.details.email} joined as ${(log.details.role ?? "").replace("_", " ")}`;
+        return `${log.details.full_name || log.details.email} joined as ${(log.details.role ?? "").replaceAll("_", " ")}`;
       default:
         return ACTION_LABEL[log.action] ?? log.action;
     }
@@ -131,7 +131,7 @@ export default function DepartmentDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Card>
           <h2 className="text-base font-bold text-[var(--text-primary)]">
-            Employees · {members.length}
+            People · {members.length}
           </h2>
           <div className="mt-4 space-y-2">
             {members.length === 0 && <p className="text-sm text-[var(--text-tertiary)]">No members in this department yet.</p>}
@@ -143,8 +143,8 @@ export default function DepartmentDetailPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
-                  <Badge tone={person.role === "super_admin" ? "primary" : person.role === "admin" ? "info" : "neutral"}>
-                    {person.role.replace("_", " ")}
+                  <Badge tone={person.role === "org_super_admin" ? "primary" : person.role === "team_leader" ? "info" : person.role === "manager" ? "warning" : "neutral"}>
+                    {person.role.replaceAll("_", " ")}
                   </Badge>
                 </div>
               </div>

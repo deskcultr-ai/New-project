@@ -131,7 +131,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // action === "approve": create the org, issue the Super Admin claim invite, email it.
+  // action === "approve": create the org, issue the Organization Super Admin claim invite, email it.
   const { data: org, error: orgError } = await admin
     .from("organizations")
     .insert({ name: orgRequest.company_name, org_request_id: orgRequest.id })
@@ -144,11 +144,11 @@ export async function POST(request: Request) {
 
   // Supabase Auth's native invite: creates the auth.users row immediately
   // (the on_auth_user_created trigger creates the profile + claims
-  // super_admin_id right away, no separate redemption step needed) and
+  // org_super_admin_id right away, no separate redemption step needed) and
   // sends the "Invite user" email template through whatever SMTP is
   // configured in the Supabase dashboard.
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(orgRequest.work_email, {
-    data: { invite_role: "super_admin", organization_id: org.id },
+    data: { invite_role: "org_super_admin", organization_id: org.id },
     redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
   });
 

@@ -5,22 +5,37 @@ every button, and what happens underneath when it's clicked. For how
 accounts/emails/login work mechanically, see [AUTH_WORKFLOW.md](./AUTH_WORKFLOW.md) —
 this file is about *what you can do once you're in*.
 
-## The four roles
+## The five roles
 
 | Role | Scope | Lands on | Tied to an org? |
 |---|---|---|---|
 | **Platform Owner** | Whole platform | `/platform-admin/requests` | No — allowlist-gated (`PLATFORM_OWNER_EMAILS`), not a `profiles` row |
-| **Super Admin** (Org Owner) | Whole organization | `/admin` | Yes — one per org, `organizations.super_admin_id` |
-| **Admin** | One department | `/admin` | Yes — `profiles.department_id` |
-| **Employee** | Themself | `/dashboard` | Yes — `profiles.department_id` |
+| **Organization Super Admin** | Whole organization | `/admin` | Yes — one per org, `organizations.org_super_admin_id` |
+| **Team Leader** | One department | `/admin` | Yes — `profiles.department_id` |
+| **Manager** | One department (narrower than Team Leader) | `/admin` | Yes — `profiles.department_id` |
+| **Executive** | Themself | `/dashboard` | Yes — `profiles.department_id` |
 
-There is exactly **one Super Admin per organization** (the person whose org
-request got approved). Everyone else in that org is either an Admin (runs
-one department) or an Employee (works inside one department). Enforcement
-is not just "hide the button" — every table (`tasks`, `messages`,
-`profiles`, storage objects, etc.) has Postgres Row Level Security that
-independently blocks cross-department/cross-org reads and writes, so this
-holds even if someone calls the API directly.
+```
+Organization Super Admin
+        v
+   Team Leader
+        v
+     Manager
+        v
+    Executive
+```
+
+There is exactly **one Organization Super Admin per organization** (the
+person whose org request got approved). Everyone else in that org is a Team
+Leader, a Manager, or an Executive, all scoped to one department. A Team
+Leader is the department's head — they can invite both Managers and
+Executives into it, and their task authority spans the whole org (see §4). A
+Manager has the same day-to-day task authority as a Team Leader but confined
+to their own department, plus the ability to invite Executives into it (see
+§5). Enforcement is not just "hide the button" — every table (`tasks`,
+`messages`, `profiles`, storage objects, etc.) has Postgres Row Level
+Security that independently blocks cross-department/cross-org reads and
+writes, so this holds even if someone calls the API directly.
 
 ---
 
@@ -37,10 +52,10 @@ holds even if someone calls the API directly.
 - Each **pending** row has two buttons:
   - **Approve** — creates the `organizations` row, then calls Supabase's
     native `admin.inviteUserByEmail()` for the contact's work email with
-    `invite_role: "super_admin"` and the new `organization_id` attached as
-    metadata. A database trigger creates their `profiles` row (status
+    `invite_role: "org_super_admin"` and the new `organization_id` attached
+    as metadata. A database trigger creates their `profiles` row (status
     `active`) immediately — before they've even opened the email — and
-    claims `organizations.super_admin_id`. An email goes out with a
+    claims `organizations.org_super_admin_id`. An email goes out with a
     sign-in link.
   - **Reject** — prompts for an optional reason, marks the row `rejected`.
     No account or org is created.
@@ -72,7 +87,7 @@ gets created — there's no self-serve signup.
 
 ---
 
-## 3. Super Admin (Org Owner)
+## 3. Organization Super Admin (Org Owner)
 
 Lands on `/admin` after signing in. Left nav: **Overview · Departments &
 People · Tasks · Messages · Drive · Settings**.
@@ -85,13 +100,13 @@ In Progress / In Review / Done) across the **entire organization**.
 This is the org's structural control panel. Three sections:
 
 - **Departments** — a text field + "Add department" button. Departments
-  are flat (org-wide), created only by the Super Admin.
-- **Invite an Admin** — email field + department dropdown + "Send invite"
-  button. This is how you populate departments: invite someone as the
-  **Admin** of a specific department. Behind the scenes: `POST
-  /api/invites` → `admin.inviteUserByEmail()` with `invite_role: "admin"`
-  and the chosen `department_id` → their account + active profile exist
-  immediately, invite email sent.
+  are flat (org-wide), created only by the Organization Super Admin.
+- **Invite Team Leaders** — email field + department dropdown + "Send
+  invite" button. This is how you populate departments: invite someone as
+  the **Team Leader** of a specific department. Behind the scenes: `POST
+  /api/invites` → `admin.inviteUserByEmail()` with `invite_role:
+  "team_leader"` and the chosen `department_id` → their account + active
+  profile exist immediately, invite email sent.
 - **Org directory** — every person in the org, with an **Active/Pending**
   badge (Pending = they haven't opened their invite email yet;
   the account and permissions are already live either way) and a role
@@ -104,65 +119,122 @@ a **New task** form:
 - Title, Due date, Description
 - **Department** — required, any department in the org
 - Priority (Low/Medium/High/Urgent)
-- **Assign to** — any **Admin or Employee** in the org (Super Admin can
-  assign across every department, not just their own)
+- **Assign to** — any **Team Leader, Manager, or Executive** in the org
+  (Organization Super Admin can assign across every department, not just
+  one)
 
 Clicking any task card opens `/tasks/[id]` (shared detail page, see
-§6 below) where you have full edit rights: status, blocked flag, priority,
+§7 below) where you have full edit rights: status, blocked flag, priority,
 and reassignment, plus comments and attachments.
 
-### `/admin/settings` — Settings (Super Admin only — Admins get redirected out)
+### `/admin/settings` — Settings (Organization Super Admin only — Team
+Leaders and Managers get redirected out)
 - **Storage usage**: total bytes and file count used across the whole
   org's task attachments, chat files, department resources, and personal
   folders (`org_storage_usage()` RPC).
 
 ### Messages & Drive
-Same as described in §6/§7 below, but with org-wide visibility: every
+Same as described in §7/§8 below, but with org-wide visibility: every
 department channel, every teammate's personal folder, every department's
 resource library.
 
 ---
 
-## 4. Admin (Department Admin)
+## 4. Team Leader (Department head)
 
 Also lands on `/admin`, same nav minus **Settings**, and every page is
-automatically scoped to their own department only — this isn't a separate
-codebase, it's the same pages as the Super Admin's with narrower data
-(enforced by RLS, not just hidden UI).
+automatically scoped to their own department only for *writes* — this
+isn't a separate codebase, it's the same pages as the Organization Super
+Admin's with narrower data (enforced by RLS, not just hidden UI). Task
+*reads* stay org-wide, a deliberate widening so a Team Leader can see how
+their department's work compares to the rest of the org.
 
 ### `/admin` — Overview
-Same layout as the Super Admin's, but task counts read: *"Task counts
-cover your department's tasks and tasks assigned to your team."*
+Same layout as the Organization Super Admin's, showing org-wide task/people
+counts.
 
 ### `/admin/people` — Team
-- No "Departments" section (Admins can't create departments).
-- **Invite an Employee** — email field only (no department picker — it's
-  locked to their own department). "Emails a link to join
-  \<Department Name\>." Behind the scenes this calls the same
-  `POST /api/invites`, but the API enforces `invite_role: "employee"` for
-  anyone who isn't a Super Admin, and forces the department to the
-  caller's own — an Admin cannot invite into another department even by
-  editing the request.
+- No "Departments" section (Team Leaders can't create departments).
+- **Invite a Manager or Executive** — email field + a role selector (no
+  department picker — inviting is locked to their own department).
+  "Emails a link to join \<Department Name\> as a Manager/Executive."
+  Behind the scenes this calls the same `POST /api/invites`, but the API
+  enforces `invite_role` to be `"manager"` or `"executive"` for a Team
+  Leader, and forces the department to the caller's own — a Team Leader
+  cannot invite into another department even by editing the request.
 - **Your team** — only people in their own department.
 
-### `/admin/tasks` — Tasks (your department's board)
+### `/admin/tasks` — Tasks (org-wide board)
 Same Kanban board and "New task" form, except:
-- **Department** field is fixed/read-only, shown as their own department name.
-- **Assign to** only lists **Employees in their department** (not other
-  Admins, not people outside the department).
+- **Department** field can be any department in the org (Team Leaders can
+  file/reassign tasks cross-department, same widening the Organization
+  Super Admin has).
+- **Assign to** lists **Managers and Executives** (not other Team Leaders,
+  not the Organization Super Admin).
 
-An Admin can edit any task within their department the same way a Super
-Admin can (status, priority, blocked flag, reassignment) — `canEditFully`
-in the task detail page is true for both `super_admin` and `admin`.
+A Team Leader can edit any task in the org the same way an Organization
+Super Admin can (status, priority, blocked flag, reassignment) —
+`canEditFully` in the task detail page is true for Organization Super
+Admin, Team Leader, and Manager alike. Deleting a task, however, stays
+scoped to the Team Leader's own department.
 
 ### Drive & Messages
-Scoped the same way — their own department's resource folder and
-personal-folder list of teammates, their department's channel plus DMs
-and Announcements (read-only for Announcements, see §7).
+Resources/personal-folder oversight and department-channel visibility stay
+org-wide for reading (any department's resources, any department's
+channel), but *writing* department resources is scoped to the Team
+Leader's own department. See §8/§9.
 
 ---
 
-## 5. Employee
+## 5. Manager (new — department task lead)
+
+Lands on `/admin` as well, same routes as Team Leader
+(`/admin`, `/admin/tasks`, `/admin/people`, `/admin/departments/[id]`), but
+every one of them is narrowed to the Manager's **own department only** —
+Manager never sees or touches another department, unlike a Team Leader.
+Manager exists to give a Team Leader a lieutenant who can run day-to-day
+task assignment for the department without handing over full department
+administration.
+
+### `/admin` — Overview
+Same layout, but every stat (departments, people, tasks) is filtered down
+to the Manager's own department instead of the whole org.
+
+### `/admin/people` — Team
+- Departments section shows only their own department card (no "Add
+  department", no delete button).
+- **Invite an Executive** — email field only, locked to their own
+  department. Managers cannot invite another Manager, a Team Leader, or
+  anyone outside their department.
+- **Your team** — only people in their own department.
+
+### `/admin/tasks` — Tasks (department board)
+Same Kanban board and "New task" form as Team Leader, except:
+- **Department** field is fixed/read-only to their own department — a
+  Manager can't file a task anywhere else.
+- **Assign to** lists **Executives in their department only**.
+- A Manager can edit any task in their own department in full (status,
+  priority, blocked flag, reassignment) — `canEditFully` is true for
+  Manager — but **cannot delete tasks** (delete stays Team Leader/
+  Organization Super Admin only) and cannot see or touch tasks in other
+  departments.
+- Manager can also review pending **task-forward requests** (§7) from
+  Executives in their own department, same as a Team Leader can.
+
+### Drive & Messages
+- Department Resources: **read-only** — Manager can view but not upload/
+  delete department resources (that stays Team Leader/Organization Super
+  Admin).
+- No "Team personal folders" oversight section — Manager cannot browse
+  anyone else's personal folder, including Executives in their own
+  department.
+- Department channel: sees and posts to their own department's channel
+  only (not every department's channel, unlike Team Leader). Reads (but
+  can't post to) Announcements, same as everyone.
+
+---
+
+## 6. Executive (individual contributor)
 
 Lands on `/dashboard` — deliberately the simplest screen in the app. Left
 nav: **My Tasks · Messages · Drive** (no admin section at all).
@@ -173,7 +245,7 @@ then priority. Each card shows title, description preview, Blocked badge
 if applicable, status, priority, and due date. Clicking one opens
 `/tasks/[id]`.
 
-### `/tasks/[id]` (as an Employee)
+### `/tasks/[id]` (as an Executive)
 Can:
 - Change **Status** (To Do → In Progress → In Review → Done)
 - Toggle **Blocked**
@@ -184,15 +256,16 @@ Can:
 
 Cannot:
 - Change priority or reassign the task — those fields are hidden entirely
-  (`canEditFully` is false for `employee`).
+  (`canEditFully` is false for `executive`).
 
 ### Drive
 - Their own **Personal Folder** only (private working space).
-- Their **department's** resource library — read-only unless they're an
-  Admin/Super Admin (`canWriteResources` gates the "+ Upload" button on
-  the department Drive page).
+- Their **department's** resource library — read-only (`canWriteResources`
+  gates the "+ Upload" button on the department Drive page, and is only
+  ever true for Team Leader/Organization Super Admin).
 - No visibility into anyone else's personal folder, and no "Team personal
-  folders" section at all (that section only renders for non-employees).
+  folders" section at all (that section only renders for Organization
+  Super Admin and Team Leader).
 
 ### Messages
 Full access to send/receive — DMs, their department channel, and reading
@@ -200,66 +273,78 @@ Full access to send/receive — DMs, their department channel, and reading
 
 ---
 
-## 6. Task assignment flow, end to end
+## 7. Task assignment flow, end to end
 
 ```
-Super Admin                    Admin                        Employee
-────────────                   ─────                        ────────
-Creates task in ANY             Creates task in THEIR
-department, assigns to          department only, assigns
-any Admin or Employee           to any Employee in that
-in the org                      department
-        │                              │
-        └──────────────┬───────────────┘
-                        ▼
+Org Super Admin              Team Leader                Manager                Executive
+────────────────             ───────────                ───────                ─────────
+Creates task in ANY           Creates task in ANY         Creates task in
+department, assigns to        department, assigns to      THEIR department
+any Team Leader, Manager,     any Manager or Executive     only, assigns to
+or Executive in the org       in the org                   any Executive in
+        │                            │                     that department
+        │                            │                            │
+        └──────────────┬─────────────┴──────────────┬─────────────┘
+                        ▼                             ▼
               tasks row created
               (department_id, assigned_to,
                created_by, priority, due_date)
                         │
                         ▼
               Assignee sees it:
-              - Employee → /dashboard "My Tasks"
-              - Admin/Super Admin → their /admin/tasks board
+              - Executive → /dashboard "My Tasks"
+              - Manager/Team Leader/Org Super Admin → their /admin/tasks board
                         │
                         ▼
               Assignee opens /tasks/[id]:
               - updates Status / Blocked (everyone)
-              - Admin/Super Admin can also change
+              - Manager/Team Leader/Org Super Admin can also change
                 Priority and reassign
               - anyone with access can comment
                 and upload attachments
 ```
 
 Practical notes:
-- **Reassignment** is only available to Admin/Super Admin — an Employee
-  can't hand a task to someone else, only update its status.
+- **Reassignment** is only available to Manager/Team Leader/Organization
+  Super Admin — an Executive can't hand a task to someone else, only
+  update its status (they can *request* a reassignment instead, below).
 - **Who can see a task at all** is enforced by RLS
-  (`can_access_task()`/direct department checks): Super Admin sees every
-  task in the org; Admin sees tasks in their own department; Employee sees
-  only tasks assigned to them (plus ones they created, if applicable).
+  (`can_access_task()`/`can_view_task()`): Organization Super Admin and
+  Team Leader see every task in the org; Manager sees tasks in their own
+  department; Executive sees only tasks assigned to them (plus ones they
+  created, if applicable).
+- **Requesting reassignment**: an Executive assigned to a task can request
+  it be forwarded to someone else, with a reason, from the task detail
+  page. Any Manager, Team Leader, or Organization Super Admin with access
+  to that task can Approve (reassigns it and notifies both people) or
+  Reject (with an optional note) from the "Reassignment Requests" panel on
+  `/admin/tasks`. A Manager only sees/approves requests for tasks in their
+  own department.
 - **Cross-linking into chat**: typing `#` in any message composer
   autocompletes task titles and drops in a live task chip — clicking it
   jumps straight to `/tasks/[id]`. This works for any task the poster has
   access to.
 - There is currently **no automatic notification** when a task is
-  assigned or reassigned — the assignee finds out by checking their board/
-  dashboard, or if someone `@mentions`/DMs them about it in Messages
-  (which *does* notify, see below).
+  assigned or reassigned other than the bell-icon notification fired by
+  the `notify_task_assignment()` trigger.
 
 ---
 
-## 7. Communication layer
+## 8. Communication layer
 
 `/messages` — three kinds of conversations, all real-time (Supabase
 Realtime subscriptions, not polling):
 
 - **Announcements** — one per org, auto-created when the org is created.
-  Everyone in the org can read it; **only the Super Admin can post**
-  (`canPost` check — Admins/Employees see "Only the Super Admin can post
-  to Announcements" instead of a composer).
+  Everyone in the org can read it; **only the Organization Super Admin can
+  post** (`canPost` check — Team Leaders/Managers/Executives see "Only the
+  Organization Super Admin can post to Announcements" instead of a
+  composer).
 - **Department channel** — one per department, auto-created when the
-  department is created. Everyone in that department can read/post;
-  people outside the department can't see it exists.
+  department is created. Organization Super Admin and Team Leader see
+  **every** department's channel (an org-wide read widening); Manager and
+  Executive only see their own department's channel. Everyone in a
+  department can read/post to it.
 - **Direct messages** — click **+ New message**, search the org directory,
   pick someone → `get_or_create_dm()` either opens the existing DM or
   creates a new one (deduplicated so you never get two DM threads with the
@@ -286,32 +371,36 @@ Inside a conversation:
 - **DMs also notify**: any new DM message creates a notification for the
   recipient, same bell icon.
 
-The **notification bell** (top-right of every page) shows the 8 most
-recent notifications, a red count badge for unread ones, and live-updates
-via Realtime as new ones arrive. Clicking one marks it read and navigates
-to its `link` (a task or a conversation).
+The **notification bell** (top-right of every page) shows the most recent
+notifications from the last two hours, a red count badge for unread ones,
+and live-updates via Realtime as new ones arrive. Clicking one marks it
+read and navigates to its `link` (a task or a conversation).
 
 ---
 
-## 8. Org Drive
+## 9. Org Drive
 
 `/drive` — files organized to mirror the org chart automatically, no
 manual folder creation:
 
-- **Departments** grid — Super Admin sees all; Admin/Employee see only
-  their own. Clicking one opens `/drive/departments/[id]`:
+- **Departments** grid — Organization Super Admin sees all; Team Leader,
+  Manager, and Executive see only their own. Clicking one opens
+  `/drive/departments/[id]`:
   - **Resources** — department-level shared files (SOPs, templates).
-    Upload button only shown if `canWriteResources` (Super Admin, or the
-    Admin of *that specific* department).
+    Upload button only shown if `canWriteResources` (Organization Super
+    Admin, or the Team Leader of *that specific* department — Manager gets
+    read access here but not the upload button).
   - **Task folders** — every task in that department, expandable to show
     its attachments (same files as on the task detail page) with an "Open
     task" shortcut.
 - **My Personal Folder** — always visible, private working space, only
-  the owner and org admins (Admin of their dept, or Super Admin) can see
-  it.
-- **Team personal folders** — Admin/Super Admin only; a grid of teammates'
-  personal folders (Admin sees their department's people, Super Admin
-  sees everyone) they can open to view/manage.
+  the owner and department/org admins (Team Leader of their dept, or
+  Organization Super Admin) can see it — Manager does not get
+  personal-folder oversight.
+- **Team personal folders** — Organization Super Admin/Team Leader only; a
+  grid of teammates' personal folders (Team Leader sees their
+  department's people, Organization Super Admin sees everyone) they can
+  open to view/manage.
 - File preview: images/PDFs/text preview inline via a modal
   (`FilePreviewModal`); other types download via a signed URL.
 - Re-uploading a file with the same name (in personal folders or resources)
@@ -321,27 +410,32 @@ manual folder creation:
 
 ---
 
-## 9. Authorization matrix
+## 10. Authorization matrix
 
-| Action | Platform Owner | Super Admin | Admin | Employee |
-|---|:---:|:---:|:---:|:---:|
-| Approve/reject org requests | ✅ | — | — | — |
-| Create departments | — | ✅ | — | — |
-| Invite an Admin | — | ✅ | — | — |
-| Invite an Employee | — | ✅ (any dept) | ✅ (own dept only) | — |
-| View storage usage (`/admin/settings`) | — | ✅ | — | — |
-| Create a task | — | ✅ (any dept) | ✅ (own dept) | — |
-| Assign / reassign a task | — | ✅ (anyone) | ✅ (own dept's employees) | — |
-| Change task status / blocked flag | — | ✅ | ✅ | ✅ (own tasks) |
-| Change task priority | — | ✅ | ✅ | — |
-| Comment / upload attachments on a task | — | ✅ | ✅ | ✅ (tasks they can see) |
-| Post to Announcements | — | ✅ | — | — |
-| Post to a department channel | — | ✅ (any) | ✅ (own dept) | ✅ (own dept) |
-| Send DMs | — | ✅ | ✅ | ✅ |
-| Upload department Resources | — | ✅ (any dept) | ✅ (own dept) | — |
-| View department Resources | — | ✅ (any dept) | ✅ (own dept) | ✅ (own dept, read-only) |
-| View own Personal Folder | — | ✅ | ✅ | ✅ |
-| View others' Personal Folders | — | ✅ (anyone) | ✅ (own dept) | — |
+| Action | Platform Owner | Org Super Admin | Team Leader | Manager | Executive |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Approve/reject org requests | ✅ | — | — | — | — |
+| Create departments | — | ✅ | — | — | — |
+| Invite a Team Leader | — | ✅ | — | — | — |
+| Invite a Manager | — | ✅ (via Team Leader) | ✅ (own dept) | — | — |
+| Invite an Executive | — | ✅ | ✅ (own dept) | ✅ (own dept) | — |
+| View directory | — | ✅ org-wide | ✅ org-wide | ✅ own dept | ✅ own dept |
+| Create a task | — | ✅ (any dept) | ✅ (any dept) | ✅ (own dept) | — |
+| Assign / reassign a task | — | ✅ (anyone) | ✅ (Manager/Executive) | ✅ (Executives, own dept) | — |
+| View tasks | — | ✅ org-wide | ✅ org-wide | ✅ own dept | own tasks only |
+| Delete a task | — | ✅ | ✅ (own dept) | — | — |
+| Change task status / blocked | — | ✅ | ✅ | ✅ | ✅ (own tasks) |
+| Approve/reject forward requests | — | ✅ | ✅ (own dept) | ✅ (own dept) | — |
+| Request task forward | — | — | — | — | ✅ |
+| Comment / upload attachments on a task | — | ✅ | ✅ | ✅ | ✅ (tasks they can see) |
+| Post to Announcements | — | ✅ | — | — | — |
+| Post to a department channel | — | ✅ (any) | ✅ (any) | ✅ (own dept) | ✅ (own dept) |
+| Send DMs | — | ✅ | ✅ | ✅ | ✅ |
+| Upload department Resources | — | ✅ (any dept) | ✅ (own dept) | — | — |
+| View department Resources | — | ✅ (any dept) | ✅ (any dept) | ✅ (own dept) | ✅ (own dept, read-only) |
+| View own Personal Folder | — | ✅ | ✅ | ✅ | ✅ |
+| View others' Personal Folders | — | ✅ (anyone) | ✅ (own dept) | — | — |
+| Storage usage / Settings | — | ✅ | — | — | — |
 
 All of the above is enforced twice — the UI hides what a role shouldn't
 see, and Postgres RLS policies independently block the underlying

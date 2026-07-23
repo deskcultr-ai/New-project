@@ -11,7 +11,7 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
     username: null,
     bio: null,
     avatar_url: null,
-    role: "employee",
+    role: "executive",
     status: "active",
     ...overrides,
   };
@@ -23,20 +23,26 @@ describe("isAdmin / isSuperAdmin", () => {
     expect(isSuperAdmin(null)).toBe(false);
   });
 
-  it("employee is neither", () => {
-    const p = makeProfile({ role: "employee" });
+  it("executive is neither", () => {
+    const p = makeProfile({ role: "executive" });
     expect(isAdmin(p)).toBe(false);
     expect(isSuperAdmin(p)).toBe(false);
   });
 
-  it("admin is an admin but not a super admin", () => {
-    const p = makeProfile({ role: "admin" });
+  it("manager is an admin but not a super admin", () => {
+    const p = makeProfile({ role: "manager" });
     expect(isAdmin(p)).toBe(true);
     expect(isSuperAdmin(p)).toBe(false);
   });
 
-  it("super_admin counts as both", () => {
-    const p = makeProfile({ role: "super_admin" });
+  it("team_leader is an admin but not a super admin", () => {
+    const p = makeProfile({ role: "team_leader" });
+    expect(isAdmin(p)).toBe(true);
+    expect(isSuperAdmin(p)).toBe(false);
+  });
+
+  it("org_super_admin counts as both", () => {
+    const p = makeProfile({ role: "org_super_admin" });
     expect(isAdmin(p)).toBe(true);
     expect(isSuperAdmin(p)).toBe(true);
   });

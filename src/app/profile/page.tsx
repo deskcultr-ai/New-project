@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getProfile, type Profile } from "@/lib/session";
+import { getProfile, ROLE_LABEL, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
 import { Button, Card, Input, Alert } from "@/components/ui";
 
@@ -169,7 +169,7 @@ export default function ProfileSettingsPage() {
     );
   }
 
-  const dashboardHref = profile.role === "employee" ? "/dashboard" : "/admin";
+  const dashboardHref = profile.role === "executive" ? "/dashboard" : "/admin";
 
   return (
     <AppShell profile={profile} title="Profile Settings">
@@ -256,7 +256,7 @@ export default function ProfileSettingsPage() {
             <div className="border-t border-[var(--divider)] pt-4">
               <p className="text-xs text-[var(--text-tertiary)] mb-3">
                 Account: <span className="font-semibold text-[var(--text-secondary)]">{profile.email}</span>
-                {" · "}Role: <span className="font-semibold text-purple-400 capitalize">{profile.role.replace("_", " ")}</span>
+                {" · "}Role: <span className="font-semibold text-purple-400">{ROLE_LABEL[profile.role]}</span>
               </p>
             </div>
 
