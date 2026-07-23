@@ -20,7 +20,10 @@
 alter type public.org_role rename value 'super_admin' to 'org_super_admin';
 alter type public.org_role rename value 'admin' to 'team_leader';
 alter type public.org_role rename value 'employee' to 'executive';
-alter type public.org_role add value 'manager' after 'team_leader';
+-- IF NOT EXISTS: a prior, never-completed attempt at this same rename left
+-- 'manager' already added (with no rename applied) on at least one
+-- environment -- this keeps the migration safe to run regardless.
+alter type public.org_role add value if not exists 'manager' after 'team_leader';
 
 -- organizations.super_admin_id -> org_super_admin_id (its unique constraint
 -- and index are renamed automatically along with the column).
