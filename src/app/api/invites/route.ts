@@ -30,13 +30,14 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { email?: string; emails?: string[]; role?: "team_leader" | "manager" | "executive"; departmentId?: string }
+    | { email?: string; emails?: string[]; role?: "team_leader" | "manager" | "executive"; departmentId?: string; managerId?: string }
     | null;
 
   // Support both single email and bulk emails array
   const rawEmails = body?.emails ?? (body?.email ? [body.email] : []);
   const role = body?.role;
   const departmentId = body?.departmentId;
+  const requestedManagerId = body?.managerId;
 
   const emails = rawEmails.map((e) => e.trim().toLowerCase()).filter((e) => EMAIL_RE.test(e));
 
@@ -88,13 +89,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Department not found in your organization." }, { status: 400 });
   }
 
+  // Manager -> Executive assignment: a Manager invites into their own team
+  // automatically; a Team Leader may optionally pick a Manager to assign
+  // the new Executive to (left unassigned otherwise, resolvable later from
+  // /admin/people).
+  let managerId: string | null = null;
+  if (role === "executive") {
+    if (callerProfile.role === "manager") {
+      managerId = callerProfile.id;
+    } else if (callerProfile.role === "team_leader" && requestedManagerId) {
+      const { data: manager, error: managerError } = await bearer.userClient
+        .from("profiles")
+        .select("id, role, department_id")
+        .eq("id", requestedManagerId)
+        .maybeSingle();
+      if (managerError || !manager || manager.role !== "manager" || manager.department_id !== departmentId) {
+        return NextResponse.json({ error: "managerId must be a Manager in this department." }, { status: 400 });
+      }
+      managerId = manager.id;
+    }
+  }
+
   const admin = await getSupabaseAdmin();
 
   // Send invites to all emails and collect results
   const results = await Promise.all(
     emails.map(async (email) => {
       const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-        data: { invite_role: role, organization_id: callerProfile.organization_id, department_id: department.id },
+        data: {
+          invite_role: role,
+          organization_id: callerProfile.organization_id,
+          department_id: department.id,
+          ...(managerId ? { manager_id: managerId } : {}),
+        },
         redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
       });
       return { email, ok: !inviteError, error: inviteError?.message };

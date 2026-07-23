@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { AppShell } from "@/components/app-shell";
-import { Button, Card, Select, Badge, Alert } from "@/components/ui";
+import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type TaskStatus, type TaskPriority } from "@/lib/tasks";
@@ -71,6 +71,9 @@ export default function TaskDetailPage() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [assigneeId, setAssigneeId] = useState("");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [savingTask, setSavingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
 
@@ -131,14 +134,17 @@ export default function TaskDetailPage() {
     setIsBlocked(detail.is_blocked);
     setPriority(detail.priority);
     setAssigneeId(detail.assigned_to ?? "");
+    setTitle(detail.title);
+    setDescription(detail.description ?? "");
+    setDueDate(detail.due_date ?? "");
     setComments((commentRows ?? []) as unknown as Comment[]);
     setAttachments((attachmentRows ?? []) as unknown as Attachment[]);
 
     if (me.role !== "executive") {
       // Org Super Admin/Team Leader browse the org-wide directory; Manager is
-      // scoped to their own department (matches org_people_status()'s scope).
+      // scoped to Executives assigned to them (matches org_people_status()'s scope).
       const query = supabase.from("profiles").select("id, full_name, username, email, role").order("full_name");
-      const { data: people } = me.role === "manager" ? await query.eq("department_id", me.department_id ?? "") : await query;
+      const { data: people } = me.role === "manager" ? await query.eq("manager_id", me.id) : await query;
       const eligibleRoles = me.role === "org_super_admin" ? ["team_leader", "manager", "executive"] : me.role === "team_leader" ? ["manager", "executive"] : ["executive"];
       setAssignees(((people ?? []) as DirectoryPerson[]).filter((p) => eligibleRoles.includes(p.role)));
     } else {
@@ -158,6 +164,9 @@ export default function TaskDetailPage() {
   }, [load]);
 
   const canEditFully = !!profile && ["org_super_admin", "team_leader", "manager"].includes(profile.role);
+  // An Executive who created their own task can fully edit it (title/description/
+  // priority/due date) -- a task assigned to them by someone else stays status/blocked-only.
+  const canEditOwnTask = !!profile && profile.role === "executive" && task?.created_by === profile.id;
 
   async function saveTask(event: React.FormEvent) {
     event.preventDefault();
@@ -169,6 +178,12 @@ export default function TaskDetailPage() {
     if (canEditFully) {
       patch.priority = priority;
       patch.assigned_to = assigneeId || null;
+    }
+    if (canEditOwnTask) {
+      patch.title = title.trim();
+      patch.description = description.trim() || null;
+      patch.priority = priority;
+      patch.due_date = dueDate || null;
     }
 
     const { error } = await supabase.from("tasks").update(patch).eq("id", task.id);
@@ -350,6 +365,35 @@ export default function TaskDetailPage() {
                         <option key={p.id} value={p.id}>{p.username ? `@${p.username}` : p.full_name || p.email} ({p.role})</option>
                       ))}
                     </Select>
+                  </label>
+                </>
+              )}
+              {canEditOwnTask && (
+                <>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)] sm:col-span-2">
+                    Title
+                    <Input required value={title} onChange={(e) => setTitle(e.target.value)} className="mt-2" />
+                  </label>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)] sm:col-span-2">
+                    Description
+                    <textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={3}
+                      className="mt-2 w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
+                    />
+                  </label>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                    Priority
+                    <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)} className="mt-2">
+                      {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="block text-sm font-semibold text-[var(--text-secondary)]">
+                    Due date
+                    <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="mt-2" />
                   </label>
                 </>
               )}

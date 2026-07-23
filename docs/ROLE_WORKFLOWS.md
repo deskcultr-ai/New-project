@@ -175,8 +175,9 @@ Same Kanban board and "New task" form, except:
 A Team Leader can edit any task in the org the same way an Organization
 Super Admin can (status, priority, blocked flag, reassignment) —
 `canEditFully` in the task detail page is true for Organization Super
-Admin, Team Leader, and Manager alike. Deleting a task, however, stays
-scoped to the Team Leader's own department.
+Admin, Team Leader, and Manager alike. **Deleting a task is Organization
+Super Admin only** — Team Leader cannot delete tasks (there's no delete
+button in the UI at all today; this is enforced at the RLS level).
 
 ### Drive & Messages
 Resources/personal-folder oversight and department-channel visibility stay
@@ -186,15 +187,27 @@ Leader's own department. See §8/§9.
 
 ---
 
-## 5. Manager (new — department task lead)
+## 5. Manager (department task lead, scoped to *their* Executives)
 
 Lands on `/admin` as well, same routes as Team Leader
 (`/admin`, `/admin/tasks`, `/admin/people`, `/admin/departments/[id]`), but
-every one of them is narrowed to the Manager's **own department only** —
-Manager never sees or touches another department, unlike a Team Leader.
-Manager exists to give a Team Leader a lieutenant who can run day-to-day
-task assignment for the department without handing over full department
-administration.
+every one of them is narrowed to the specific Executives assigned to that
+Manager — **not** every Executive in the department. Two Managers in the
+same department own non-overlapping sets of Executives; a Manager never
+sees or manages an Executive who isn't assigned to them.
+
+This assignment lives on `profiles.manager_id` (nullable, only meaningful
+for Executives):
+- **Set automatically** when a Manager invites an Executive — the new
+  Executive is assigned to that Manager immediately.
+- **Optionally set** when a Team Leader invites an Executive — their invite
+  form has an "Assign to Manager" dropdown (departments with no Manager
+  yet, or if left blank, the Executive starts unassigned).
+- **Reassignable afterward** from `/admin/people`'s directory — a "Manager"
+  dropdown next to each Executive, editable by their Team Leader (own
+  department) or the Organization Super Admin (anyone), calling the
+  `assign_executive_manager()` RPC. This is also how an Executive who ended
+  up unassigned gets resolved.
 
 ### `/admin` — Overview
 Same layout, but every stat (departments, people, tasks) is filtered down
@@ -204,22 +217,26 @@ to the Manager's own department instead of the whole org.
 - Departments section shows only their own department card (no "Add
   department", no delete button).
 - **Invite an Executive** — email field only, locked to their own
-  department. Managers cannot invite another Manager, a Team Leader, or
+  department, and the new Executive is assigned to this Manager
+  automatically. Managers cannot invite another Manager, a Team Leader, or
   anyone outside their department.
-- **Your team** — only people in their own department.
+- **Your team** — only the Executives assigned to them (`manager_id` =
+  their own id), not the whole department.
 
-### `/admin/tasks` — Tasks (department board)
+### `/admin/tasks` — Tasks (scoped to their Executives)
 Same Kanban board and "New task" form as Team Leader, except:
 - **Department** field is fixed/read-only to their own department — a
   Manager can't file a task anywhere else.
-- **Assign to** lists **Executives in their department only**.
-- A Manager can edit any task in their own department in full (status,
-  priority, blocked flag, reassignment) — `canEditFully` is true for
-  Manager — but **cannot delete tasks** (delete stays Team Leader/
-  Organization Super Admin only) and cannot see or touch tasks in other
-  departments.
+- **Assign to** lists only **Executives assigned to them** — not every
+  Executive in the department.
+- A Manager can edit any task assigned to one of their Executives in full
+  (status, priority, blocked flag, reassignment) — `canEditFully` is true
+  for Manager — but **cannot delete tasks** (Organization Super Admin
+  only) and cannot see or touch tasks belonging to Executives who aren't
+  assigned to them, even within the same department.
 - Manager can also review pending **task-forward requests** (§7) from
-  Executives in their own department, same as a Team Leader can.
+  their own assigned Executives, same as a Team Leader can for their
+  department.
 
 ### Drive & Messages
 - Department Resources: **read-only** — Manager can view but not upload/
@@ -240,13 +257,16 @@ Lands on `/dashboard` — deliberately the simplest screen in the app. Left
 nav: **My Tasks · Messages · Drive** (no admin section at all).
 
 ### `/dashboard` — My Tasks
-A flat list of only the tasks **assigned to them**, sorted by due date
-then priority. Each card shows title, description preview, Blocked badge
-if applicable, status, priority, and due date. Clicking one opens
-`/tasks/[id]`.
+A "New task" form at the top (Title, Description, Priority, Due date) lets
+an Executive create a task **for themselves** — department and assignee are
+fixed to their own, hidden from the form. Below it, a flat list of every
+task **assigned to them** (self-created or assigned by someone else),
+sorted by due date then priority. Each card shows title, description
+preview, Blocked badge if applicable, status, priority, and due date.
+Clicking one opens `/tasks/[id]`.
 
 ### `/tasks/[id]` (as an Executive)
-Can:
+Can always:
 - Change **Status** (To Do → In Progress → In Review → Done)
 - Toggle **Blocked**
 - Add **comments**
@@ -254,9 +274,15 @@ Can:
   version instead of overwriting it — see the version history under each
   attachment)
 
-Cannot:
-- Change priority or reassign the task — those fields are hidden entirely
-  (`canEditFully` is false for `executive`).
+On a task **they created for themselves**, additionally:
+- Edit **Title, Description, Priority, and Due date** in full.
+
+On a task **assigned to them by someone else** (created_by isn't them):
+- Cannot change priority, reassign, retitle, reschedule, or edit the
+  description — those fields are hidden entirely (`canEditFully` is false
+  and `canEditOwnTask` requires `created_by = them`).
+- Can never reassign a task away from themselves either way — Executives
+  always request a reassignment instead (below), they never set it directly.
 
 ### Drive
 - Their own **Personal Folder** only (private working space).
@@ -276,16 +302,15 @@ Full access to send/receive — DMs, their department channel, and reading
 ## 7. Task assignment flow, end to end
 
 ```
-Org Super Admin              Team Leader                Manager                Executive
-────────────────             ───────────                ───────                ─────────
-Creates task in ANY           Creates task in ANY         Creates task in
-department, assigns to        department, assigns to      THEIR department
-any Team Leader, Manager,     any Manager or Executive     only, assigns to
-or Executive in the org       in the org                   any Executive in
-        │                            │                     that department
-        │                            │                            │
-        └──────────────┬─────────────┴──────────────┬─────────────┘
-                        ▼                             ▼
+Org Super Admin              Team Leader                Manager                     Executive
+────────────────             ───────────                ───────                     ─────────
+Creates task in ANY           Creates task in ANY         Creates task in THEIR       Creates a task for
+department, assigns to        department, assigns to      department only, assigns   THEMSELVES only --
+any Team Leader, Manager,     any Manager or Executive     only to an Executive       department fixed,
+or Executive in the org       in the org                   assigned to them           assignee fixed
+        │                            │                            │                          │
+        └────────────────────────────┴────────────────────────────┴──────────────────────────┘
+                                                    ▼
               tasks row created
               (department_id, assigned_to,
                created_by, priority, due_date)
@@ -300,19 +325,26 @@ or Executive in the org       in the org                   any Executive in
               - updates Status / Blocked (everyone)
               - Manager/Team Leader/Org Super Admin can also change
                 Priority and reassign
+              - Executive can also edit Title/Description/Priority/Due
+                date, but only on a task they created for themselves
               - anyone with access can comment
                 and upload attachments
 ```
 
 Practical notes:
 - **Reassignment** is only available to Manager/Team Leader/Organization
-  Super Admin — an Executive can't hand a task to someone else, only
-  update its status (they can *request* a reassignment instead, below).
+  Super Admin, and even then only to people in scope for that role (Team
+  Leader → any Manager/Executive in the org; Manager → only Executives
+  assigned to them) — an Executive can never hand a task to someone else,
+  even one they created themselves; they can only update its status (they
+  can *request* a reassignment instead, below).
 - **Who can see a task at all** is enforced by RLS
   (`can_access_task()`/`can_view_task()`): Organization Super Admin and
-  Team Leader see every task in the org; Manager sees tasks in their own
-  department; Executive sees only tasks assigned to them (plus ones they
-  created, if applicable).
+  Team Leader see every task in the org; Manager sees tasks assigned to
+  their own Executives (not the whole department); Executive sees only
+  tasks assigned to them (including ones they created for themselves).
+- **Deleting a task** is Organization Super Admin only, at every level of
+  this chain.
 - **Requesting reassignment**: an Executive assigned to a task can request
   it be forwarded to someone else, with a reason, from the task detail
   page. Any Manager, Team Leader, or Organization Super Admin with access
@@ -419,13 +451,15 @@ manual folder creation:
 | Invite a Team Leader | — | ✅ | — | — | — |
 | Invite a Manager | — | ✅ (via Team Leader) | ✅ (own dept) | — | — |
 | Invite an Executive | — | ✅ | ✅ (own dept) | ✅ (own dept) | — |
-| View directory | — | ✅ org-wide | ✅ org-wide | ✅ own dept | ✅ own dept |
-| Create a task | — | ✅ (any dept) | ✅ (any dept) | ✅ (own dept) | — |
-| Assign / reassign a task | — | ✅ (anyone) | ✅ (Manager/Executive) | ✅ (Executives, own dept) | — |
-| View tasks | — | ✅ org-wide | ✅ org-wide | ✅ own dept | own tasks only |
-| Delete a task | — | ✅ | ✅ (own dept) | — | — |
+| View directory | — | ✅ org-wide | ✅ org-wide | ✅ assigned Executives only | ✅ own dept |
+| Reassign an Executive's Manager | — | ✅ (anyone) | ✅ (own dept) | — | — |
+| Create a task | — | ✅ (any dept) | ✅ (any dept) | ✅ (own dept) | ✅ (for themselves only) |
+| Assign / reassign a task | — | ✅ (anyone) | ✅ (Manager/Executive) | ✅ (assigned Executives only) | — |
+| View tasks | — | ✅ org-wide | ✅ org-wide | ✅ assigned Executives' tasks | own tasks only |
+| Delete a task | — | ✅ | — | — | — |
 | Change task status / blocked | — | ✅ | ✅ | ✅ | ✅ (own tasks) |
-| Approve/reject forward requests | — | ✅ | ✅ (own dept) | ✅ (own dept) | — |
+| Edit title/description/priority/due date on a self-created task | — | ✅ | ✅ | ✅ | ✅ (own self-created tasks only) |
+| Approve/reject forward requests | — | ✅ | ✅ (own dept) | ✅ (assigned Executives only) | — |
 | Request task forward | — | — | — | — | ✅ |
 | Comment / upload attachments on a task | — | ✅ | ✅ | ✅ | ✅ (tasks they can see) |
 | Post to Announcements | — | ✅ | — | — | — |

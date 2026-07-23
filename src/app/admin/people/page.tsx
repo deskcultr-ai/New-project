@@ -16,6 +16,7 @@ type PersonStatus = {
   username: string | null;
   role: "org_super_admin" | "team_leader" | "manager" | "executive";
   department_id: string | null;
+  manager_id: string | null;
   invited_at: string | null;
   confirmed_at: string | null;
 };
@@ -51,10 +52,13 @@ export default function AdminPeoplePage() {
   const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteDeptId, setInviteDeptId] = useState("");
   const [inviteRole, setInviteRole] = useState<"manager" | "executive">("executive");
+  const [inviteManagerId, setInviteManagerId] = useState("");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
   const [deleteError, setDeleteError] = useState("");
+  const [managerAssignBusyId, setManagerAssignBusyId] = useState<string | null>(null);
+  const [managerAssignError, setManagerAssignError] = useState("");
 
   const load = useCallback(async () => {
     const me = await getProfile();
@@ -157,6 +161,7 @@ export default function AdminPeoplePage() {
     setInviteNotice("");
 
     const role = profile.role === "org_super_admin" ? "team_leader" : profile.role === "team_leader" ? inviteRole : "executive";
+    const managerId = role === "executive" && profile.role === "team_leader" && inviteManagerId ? inviteManagerId : undefined;
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) {
@@ -167,7 +172,7 @@ export default function AdminPeoplePage() {
     const response = await fetch("/api/invites", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ emails: inviteEmails, role, departmentId: inviteDeptId }),
+      body: JSON.stringify({ emails: inviteEmails, role, departmentId: inviteDeptId, ...(managerId ? { managerId } : {}) }),
     });
     const result = await response.json();
 
@@ -179,6 +184,7 @@ export default function AdminPeoplePage() {
 
     const { succeeded = [], failed = [] } = result;
     setInviteEmails([]);
+    setInviteManagerId("");
 
     if (succeeded.length > 0 && failed.length === 0) {
       setInviteNotice(`✓ Invite${succeeded.length > 1 ? "s" : ""} sent to ${succeeded.join(", ")}`);
@@ -186,6 +192,21 @@ export default function AdminPeoplePage() {
       setInviteNotice(`✓ Sent to ${succeeded.join(", ")}. Failed: ${failed.map((f: {email:string}) => f.email).join(", ")}`);
     } else {
       setInviteError(`Failed to send invites. ${result.emailError ?? ""}`);
+    }
+    load();
+  }
+
+  async function reassignManager(executiveId: string, managerId: string) {
+    setManagerAssignBusyId(executiveId);
+    setManagerAssignError("");
+    const { error } = await supabase.rpc("assign_executive_manager", {
+      p_executive_id: executiveId,
+      p_manager_id: managerId || null,
+    });
+    setManagerAssignBusyId(null);
+    if (error) {
+      setManagerAssignError(error.message);
+      return;
     }
     load();
   }
@@ -317,6 +338,14 @@ export default function AdminPeoplePage() {
                         <option value="manager">As Manager</option>
                       </Select>
                     )}
+                    {profile.role === "team_leader" && inviteRole === "executive" && (
+                      <Select value={inviteManagerId} onChange={(e) => setInviteManagerId(e.target.value)} className="w-52">
+                        <option value="">No manager (assign later)</option>
+                        {people.filter((p) => p.role === "manager" && p.department_id === profile.department_id).map((m) => (
+                          <option key={m.profile_id} value={m.profile_id}>Reports to {m.full_name || personSubtitle(m)}</option>
+                        ))}
+                      </Select>
+                    )}
                     <Button type="submit" disabled={inviteBusy || inviteEmails.length === 0 || !inviteDeptId}>
                       {inviteBusy ? `Sending ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}...` : `Send ${inviteEmails.length > 1 ? `${inviteEmails.length} invites` : "invite"}`}
                     </Button>
@@ -327,32 +356,52 @@ export default function AdminPeoplePage() {
               </Card>
 
               <Card>
-                <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "org_super_admin" ? "Org directory" : "Your team"}</h2>
-                {(profile.role === "team_leader" || profile.role === "manager") && (
-                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    {profile.role === "team_leader"
-                      ? "Your own department. Click any department card above to see people in other departments."
-                      : "Your own department."}
-                  </p>
+                <h2 className="text-base font-bold text-[var(--text-primary)]">{profile.role === "org_super_admin" ? "Org directory" : profile.role === "team_leader" ? "Org directory" : "Your team"}</h2>
+                {profile.role === "team_leader" && (
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">Everyone in your organization. You can reassign which Manager an Executive reports to below.</p>
                 )}
+                {profile.role === "manager" && (
+                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">Only Executives assigned to you.</p>
+                )}
+                {managerAssignError && <Alert tone="danger" className="mt-3">{managerAssignError}</Alert>}
                 <div className="mt-4 space-y-3">
                   {(() => {
-                    const visiblePeople = profile.role === "manager" ? people.filter((p) => p.department_id === profile.department_id) : people;
+                    // org_people_status() already scopes rows correctly per role
+                    // (org-wide for org_super_admin/team_leader, assigned-only for manager).
+                    const visiblePeople = people;
                     if (visiblePeople.length === 0) return <p className="text-sm text-[var(--text-tertiary)]">Nobody here yet.</p>;
-                    return visiblePeople.map((person) => (
-                      <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
-                        <div>
-                          <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || personSubtitle(person)}</p>
-                          <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{personSubtitle(person)} · {deptName(person.department_id)}</p>
+                    return visiblePeople.map((person) => {
+                      const deptManagers = people.filter((p) => p.role === "manager" && p.department_id === person.department_id);
+                      // Reassignment RPC scopes Team Leader to their own department; Org Super Admin can reassign anyone.
+                      const canReassign = profile.role === "org_super_admin" || (profile.role === "team_leader" && person.department_id === profile.department_id);
+                      return (
+                        <div key={person.profile_id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--divider)] pb-3 last:border-0 last:pb-0">
+                          <div>
+                            <p className="text-sm font-semibold text-[var(--text-primary)] m-0">{person.full_name || personSubtitle(person)}</p>
+                            <p className="text-xs text-[var(--text-secondary)] m-0 mt-1">{personSubtitle(person)} · {deptName(person.department_id)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
+                            <Badge tone={roleBadgeTone(person.role)}>
+                              {person.role.replaceAll("_", " ")}
+                            </Badge>
+                            {person.role === "executive" && canReassign && (
+                              <Select
+                                value={person.manager_id ?? ""}
+                                onChange={(e) => reassignManager(person.profile_id, e.target.value)}
+                                disabled={managerAssignBusyId === person.profile_id}
+                                className="h-8 w-40 text-xs"
+                              >
+                                <option value="">Unassigned</option>
+                                {deptManagers.map((m) => (
+                                  <option key={m.profile_id} value={m.profile_id}>{m.full_name || personSubtitle(m)}</option>
+                                ))}
+                              </Select>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge tone={person.confirmed_at ? "success" : "warning"}>{person.confirmed_at ? "Active" : "Pending"}</Badge>
-                          <Badge tone={roleBadgeTone(person.role)}>
-                            {person.role.replaceAll("_", " ")}
-                          </Badge>
-                        </div>
-                      </div>
-                    ));
+                      );
+                    });
                   })()}
                 </div>
               </Card>

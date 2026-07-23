@@ -9,7 +9,7 @@ import { Button, Card, Input, Select, Badge, Alert } from "@/components/ui";
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_TONE, getDueUrgency, DUE_URGENCY_LABEL, DUE_URGENCY_TONE, type Task, type TaskPriority } from "@/lib/tasks";
 
 type Department = { id: string; name: string };
-type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string; department_id: string | null };
+type DirectoryPerson = { id: string; full_name: string | null; username: string | null; email: string; role: string; department_id: string | null; manager_id: string | null };
 type ForwardRequest = {
   id: string;
   task_id: string;
@@ -70,18 +70,18 @@ export default function AdminTasksPage() {
 
     const [{ data: depts }, { data: people }, { data: taskRows }] = await Promise.all([
       supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name"),
-      supabase.from("profiles").select("id, full_name, username, email, role, department_id").order("full_name"),
+      supabase.from("profiles").select("id, full_name, username, email, role, department_id, manager_id").order("full_name"),
       supabase.from("tasks").select("*").order("created_at", { ascending: false }),
     ]);
 
     setDepartments(depts ?? []);
     // Org Super Admin assigns to anyone; Team Leader assigns to Manager/Executive;
-    // Manager assigns to Executives in their own department only.
+    // Manager assigns only to Executives assigned to them (not just in their department).
     const eligibleRoles =
       me.role === "org_super_admin" ? ["team_leader", "manager", "executive"] : me.role === "team_leader" ? ["manager", "executive"] : ["executive"];
     setAssignees(
       ((people ?? []) as DirectoryPerson[]).filter(
-        (p) => eligibleRoles.includes(p.role) && (me.role !== "manager" || p.department_id === me.department_id)
+        (p) => eligibleRoles.includes(p.role) && (me.role !== "manager" || p.manager_id === me.id)
       )
     );
     setTasks((taskRows ?? []) as Task[]);
