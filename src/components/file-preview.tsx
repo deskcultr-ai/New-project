@@ -20,10 +20,22 @@ function isPdf(contentType?: string | null, name?: string) {
   return /\.pdf$/i.test(name ?? "");
 }
 
+export function isVideo(contentType?: string | null, name?: string) {
+  if (contentType?.startsWith("video/")) return true;
+  return /\.(mp4|webm|mov|m4v|ogv)$/i.test(name ?? "");
+}
+
+export function isAudio(contentType?: string | null, name?: string) {
+  if (contentType?.startsWith("audio/")) return true;
+  return /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(name ?? "");
+}
+
 export function FilePreviewModal({ target, onClose }: { target: PreviewTarget; onClose: () => void }) {
   if (!target) return null;
   const previewImage = isImage(target.contentType, target.name);
   const previewPdf = isPdf(target.contentType, target.name);
+  const previewVideo = isVideo(target.contentType, target.name);
+  const previewAudio = isAudio(target.contentType, target.name);
 
   return (
     <Modal
@@ -41,7 +53,11 @@ export function FilePreviewModal({ target, onClose }: { target: PreviewTarget; o
         <img src={target.url} alt={target.name} className="max-h-[70vh] w-full rounded-lg object-contain" />
       )}
       {previewPdf && <iframe src={target.url} className="h-[70vh] w-full rounded-lg border border-slate-200" title={target.name} />}
-      {!previewImage && !previewPdf && <p className="text-sm text-slate-500">No in-browser preview for this file type -- use Open / Download below.</p>}
+      {previewVideo && <video src={target.url} controls className="max-h-[70vh] w-full rounded-lg" />}
+      {previewAudio && <audio src={target.url} controls className="w-full" />}
+      {!previewImage && !previewPdf && !previewVideo && !previewAudio && (
+        <p className="text-sm text-slate-500">No in-browser preview for this file type -- use Open / Download below.</p>
+      )}
     </Modal>
   );
 }

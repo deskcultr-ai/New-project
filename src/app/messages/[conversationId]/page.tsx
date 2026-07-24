@@ -1,16 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getProfile, displayName, type Profile } from "@/lib/session";
 import { Button, Badge, Avatar, Modal, Alert } from "@/components/ui";
-import { FilePreviewModal, useFilePreview, isImage } from "@/components/file-preview";
-import { uploadFileWithRetry } from "@/lib/storage-upload";
+import { FilePreviewModal, useFilePreview, isImage, isVideo, isAudio } from "@/components/file-preview";
+import { uploadFileWithProgress } from "@/lib/storage-upload";
 import { parseMessageBody, taskToken, formatDayLabel, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
 
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const GROUP_GAP_MS = 5 * 60 * 1000;
+const PAGE_SIZE = 50;
 
 type PersonRef = { id: string; full_name: string | null; username: string | null; email: string } | null;
 type MessageRow = {
@@ -34,6 +35,11 @@ type DirectoryPerson = { id: string; full_name: string | null; email: string };
 type TaskSuggestion = { id: string; title: string };
 type ForwardTarget = { id: string; label: string };
 type ConversationRow = { id: string; type: ConversationType; department_id: string | null; dm_profile_a: string | null; dm_profile_b: string | null };
+type SearchHit = { id: string; body: string; created_at: string; author: PersonRef };
+
+function fileKey(file: File): string {
+  return `${file.name}-${file.lastModified}-${file.size}`;
+}
 
 function personLabel(person: PersonRef) {
   if (!person) return "?";
@@ -81,6 +87,7 @@ export default function ConversationPage() {
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const suppressAutoScrollRef = useRef(false);
 
   const [replyBody, setReplyBody] = useState("");
   const [replySending, setReplySending] = useState(false);
@@ -88,6 +95,32 @@ export default function ConversationPage() {
   const [replyDragOver, setReplyDragOver] = useState(false);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const threadBottomRef = useRef<HTMLDivElement>(null);
+
+  const [uploadProgress, setUploadProgress] = useState<Map<string, number>>(new Map());
+
+  // Pagination: only the most recent PAGE_SIZE messages load up front; the
+  // sentinel/IntersectionObserver below fetches older batches on demand.
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const oldestLoadedAtRef = useRef<string | null>(null);
+  const hasMoreOlderRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const prependScrollAnchorRef = useRef<number | null>(null);
+  const [hasMoreOlder, setHasMoreOlderState] = useState(true);
+  const [loadingOlder, setLoadingOlderState] = useState(false);
+  function setHasMoreOlder(value: boolean) {
+    hasMoreOlderRef.current = value;
+    setHasMoreOlderState(value);
+  }
+  function setLoadingOlder(value: boolean) {
+    loadingOlderRef.current = value;
+    setLoadingOlderState(value);
+  }
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
 
   function flashError(message: string) {
     setActionError(message);
@@ -135,8 +168,11 @@ export default function ConversationPage() {
       .from("messages")
       .select("id, conversation_id, author_id, body, created_at, edited_at, deleted_at, deleted_for_everyone, reply_to_message_id, author:profiles(id,full_name,username,email)")
       .eq("conversation_id", params.conversationId)
-      .order("created_at", { ascending: true });
-    const allRows = (messageRows ?? []) as unknown as MessageRow[];
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE);
+    const allRows = ((messageRows ?? []) as unknown as MessageRow[]).slice().reverse();
+    setHasMoreOlder(allRows.length === PAGE_SIZE);
+    oldestLoadedAtRef.current = allRows[0]?.created_at ?? null;
 
     const { data: hiddenRows } = await supabase.from("message_hidden_for").select("message_id").eq("profile_id", me.id);
     const hiddenSet = new Set((hiddenRows ?? []).map((r) => r.message_id as string));
@@ -182,6 +218,99 @@ export default function ConversationPage() {
     }
     run();
   }, [load]);
+
+  // Fetches the next PAGE_SIZE messages older than the earliest one
+  // currently loaded, merges them in, and anchors scroll position so the
+  // view doesn't jump (see the useLayoutEffect below). Guards read off
+  // refs (not state) so this stays a stable callback the sentinel observer
+  // effect doesn't need to keep re-subscribing.
+  const loadOlderMessages = useCallback(async () => {
+    if (!hasMoreOlderRef.current || loadingOlderRef.current || !oldestLoadedAtRef.current) return;
+    setLoadingOlder(true);
+    const earliest = oldestLoadedAtRef.current;
+    const me = await getProfile();
+
+    const { data: olderRows } = await supabase
+      .from("messages")
+      .select("id, conversation_id, author_id, body, created_at, edited_at, deleted_at, deleted_for_everyone, reply_to_message_id, author:profiles(id,full_name,username,email)")
+      .eq("conversation_id", params.conversationId)
+      .lt("created_at", earliest)
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE);
+
+    const rows = ((olderRows ?? []) as unknown as MessageRow[]).slice().reverse();
+    if (rows.length < PAGE_SIZE) setHasMoreOlder(false);
+    if (rows.length === 0) {
+      setLoadingOlder(false);
+      return;
+    }
+
+    const hiddenSet = new Set<string>();
+    if (me) {
+      const { data: hiddenRows } = await supabase
+        .from("message_hidden_for")
+        .select("message_id")
+        .eq("profile_id", me.id)
+        .in("message_id", rows.map((r) => r.id));
+      for (const h of hiddenRows ?? []) hiddenSet.add(h.message_id as string);
+    }
+    const visibleRows = rows.filter((r) => !hiddenSet.has(r.id));
+    oldestLoadedAtRef.current = rows[0]?.created_at ?? oldestLoadedAtRef.current;
+
+    const messageIds = rows.map((r) => r.id);
+    const [{ data: attachmentRows }, { data: reactionRows }, { data: readRows }] = await Promise.all([
+      supabase.from("message_attachments").select("id, message_id, storage_path, file_name, file_size, content_type").in("message_id", messageIds),
+      supabase.from("message_reactions").select("id, message_id, profile_id, emoji").in("message_id", messageIds),
+      supabase.from("message_reads").select("message_id, profile_id, read_at").in("message_id", messageIds),
+    ]);
+
+    suppressAutoScrollRef.current = true;
+    prependScrollAnchorRef.current = messagesContainerRef.current?.scrollHeight ?? null;
+
+    setMessages((current) => {
+      const known = new Set(current.map((m) => m.id));
+      return [...visibleRows.filter((r) => !known.has(r.id)), ...current];
+    });
+    setAttachments((current) => {
+      const known = new Set(current.map((a) => a.id));
+      return [...current, ...((attachmentRows ?? []) as Attachment[]).filter((a) => !known.has(a.id))];
+    });
+    setReactions((current) => {
+      const known = new Set(current.map((r) => r.id));
+      return [...current, ...((reactionRows ?? []) as Reaction[]).filter((r) => !known.has(r.id))];
+    });
+    setReads((current) => {
+      const known = new Set(current.map((r) => `${r.message_id}:${r.profile_id}`));
+      return [...current, ...((readRows ?? []) as MessageRead[]).filter((r) => !known.has(`${r.message_id}:${r.profile_id}`))];
+    });
+
+    setLoadingOlder(false);
+  }, [params.conversationId]);
+
+  // Runs synchronously after the prepended (older) messages are committed to
+  // the DOM but before the browser paints, so the scrollbar never visibly
+  // jumps -- the standard fix for "load older content above the viewport."
+  useLayoutEffect(() => {
+    if (prependScrollAnchorRef.current === null) return;
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop += container.scrollHeight - prependScrollAnchorRef.current;
+    }
+    prependScrollAnchorRef.current = null;
+  }, [messages]);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadOlderMessages();
+      },
+      { root: messagesContainerRef.current, threshold: 0 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadOlderMessages]);
 
   useEffect(() => {
     const channel = supabase
@@ -325,6 +454,13 @@ export default function ConversationPage() {
   }
 
   useEffect(() => {
+    // A length change caused by loadOlderMessages/jumpToMessage prepending
+    // older history must not also scroll to the bottom -- that flag is set
+    // right before those merges and consumed here exactly once.
+    if (suppressAutoScrollRef.current) {
+      suppressAutoScrollRef.current = false;
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [topLevelMessages.length]);
 
@@ -334,6 +470,129 @@ export default function ConversationPage() {
 
   function scrollToMessage(messageId: string) {
     document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Drafts: restore on mount / conversation switch, debounce-persist on
+  // every change, and let the natural "body becomes empty" transition
+  // (already happens on successful send) clear it -- no separate
+  // clear-on-send code needed.
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem(`draft:${params.conversationId}`) : null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores a locally-persisted draft once per conversation switch
+    if (saved) setBody(saved);
+  }, [params.conversationId]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      const key = `draft:${params.conversationId}`;
+      if (body) window.localStorage.setItem(key, body);
+      else window.localStorage.removeItem(key);
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [body, params.conversationId]);
+
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const saved = window.localStorage.getItem(`draft:${params.conversationId}:reply:${activeThreadId}`);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores a locally-persisted draft once per thread switch
+    setReplyBody(saved ?? "");
+  }, [activeThreadId, params.conversationId]);
+
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const timeout = setTimeout(() => {
+      const key = `draft:${params.conversationId}:reply:${activeThreadId}`;
+      if (replyBody) window.localStorage.setItem(key, replyBody);
+      else window.localStorage.removeItem(key);
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [replyBody, activeThreadId, params.conversationId]);
+
+  // In-conversation search -- scoped to this conversation_id only (the
+  // sidebar's search in layout.tsx already covers cross-conversation).
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets stale results when the search box is cleared/shortened
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timeout = setTimeout(async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("id, body, created_at, author:profiles(id,full_name,username,email)")
+        .eq("conversation_id", params.conversationId)
+        .ilike("body", `%${q}%`)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      setSearchResults((data ?? []) as unknown as SearchHit[]);
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery, searchOpen, params.conversationId]);
+
+  // Jumps to a search hit. If it's already loaded (within the paginated
+  // window), just scrolls; otherwise fetches a window of messages around
+  // it and merges them in. This can leave a gap between that window and
+  // whatever was already loaded -- loadOlderMessages keeps working forward
+  // from the new (possibly earlier) oldest-loaded timestamp regardless,
+  // it just won't automatically backfill that particular gap.
+  async function jumpToMessage(messageId: string, createdAt: string) {
+    setSearchOpen(false);
+    if (messages.some((m) => m.id === messageId)) {
+      requestAnimationFrame(() => scrollToMessage(messageId));
+      return;
+    }
+    const me = await getProfile();
+    const columns = "id, conversation_id, author_id, body, created_at, edited_at, deleted_at, deleted_for_everyone, reply_to_message_id, author:profiles(id,full_name,username,email)";
+    const [{ data: beforeRows }, { data: afterRows }] = await Promise.all([
+      supabase.from("messages").select(columns).eq("conversation_id", params.conversationId).lte("created_at", createdAt).order("created_at", { ascending: false }).limit(15),
+      supabase.from("messages").select(columns).eq("conversation_id", params.conversationId).gt("created_at", createdAt).order("created_at", { ascending: true }).limit(15),
+    ]);
+    const windowRows = [...((beforeRows ?? []) as unknown as MessageRow[]).slice().reverse(), ...((afterRows ?? []) as unknown as MessageRow[])];
+
+    let hiddenSet = new Set<string>();
+    if (me) {
+      const { data: hiddenRows } = await supabase.from("message_hidden_for").select("message_id").eq("profile_id", me.id).in("message_id", windowRows.map((r) => r.id));
+      hiddenSet = new Set((hiddenRows ?? []).map((h) => h.message_id as string));
+    }
+    const visibleWindow = windowRows.filter((r) => !hiddenSet.has(r.id));
+    const messageIds = windowRows.map((r) => r.id);
+    const [{ data: attachmentRows }, { data: reactionRows }, { data: readRows }] = await Promise.all([
+      supabase.from("message_attachments").select("id, message_id, storage_path, file_name, file_size, content_type").in("message_id", messageIds),
+      supabase.from("message_reactions").select("id, message_id, profile_id, emoji").in("message_id", messageIds),
+      supabase.from("message_reads").select("message_id, profile_id, read_at").in("message_id", messageIds),
+    ]);
+
+    suppressAutoScrollRef.current = true;
+    setMessages((current) => {
+      const known = new Set(current.map((m) => m.id));
+      const merged = [...current, ...visibleWindow.filter((r) => !known.has(r.id))];
+      merged.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      return merged;
+    });
+    setAttachments((current) => {
+      const known = new Set(current.map((a) => a.id));
+      return [...current, ...((attachmentRows ?? []) as Attachment[]).filter((a) => !known.has(a.id))];
+    });
+    setReactions((current) => {
+      const known = new Set(current.map((r) => r.id));
+      return [...current, ...((reactionRows ?? []) as Reaction[]).filter((r) => !known.has(r.id))];
+    });
+    setReads((current) => {
+      const known = new Set(current.map((r) => `${r.message_id}:${r.profile_id}`));
+      return [...current, ...((readRows ?? []) as MessageRead[]).filter((r) => !known.has(`${r.message_id}:${r.profile_id}`))];
+    });
+
+    const earliestInWindow = visibleWindow[0]?.created_at;
+    if (earliestInWindow && (!oldestLoadedAtRef.current || earliestInWindow < oldestLoadedAtRef.current)) {
+      oldestLoadedAtRef.current = earliestInWindow;
+    }
+
+    requestAnimationFrame(() => scrollToMessage(messageId));
   }
 
   function sendTyping(typing: boolean) {
@@ -392,8 +651,11 @@ export default function ConversationPage() {
   // to local state directly instead of re-fetching everything.
   async function uploadMessageAttachment(messageId: string, file: File): Promise<Attachment | null> {
     if (!profile) return null;
+    const key = fileKey(file);
     const path = `${profile.organization_id}/messages/${params.conversationId}/${messageId}/${Date.now()}-${file.name}`;
-    const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, file);
+    const { error: uploadErr } = await uploadFileWithProgress("org-drive", path, file, (percent) => {
+      setUploadProgress((current) => new Map(current).set(key, percent));
+    });
     if (uploadErr) return null;
     const { data, error: insertErr } = await supabase
       .from("message_attachments")
@@ -407,6 +669,11 @@ export default function ConversationPage() {
       })
       .select("id, message_id, storage_path, file_name, file_size, content_type")
       .single();
+    setUploadProgress((current) => {
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
     if (insertErr) return null;
     return data as Attachment;
   }
@@ -745,6 +1012,50 @@ export default function ConversationPage() {
             {actionError}
           </Alert>
         )}
+        <div className="flex items-center justify-between border-b border-[var(--divider)] px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setSearchOpen((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 py-1 text-xs font-semibold text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+            </svg>
+            Search
+          </button>
+        </div>
+        {searchOpen && (
+          <div className="border-b border-[var(--divider)] p-2.5 space-y-1.5">
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search in this conversation..."
+              className="w-full rounded-lg border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6]"
+            />
+            {searching && <p className="px-1 text-xs text-[var(--text-tertiary)]">Searching...</p>}
+            {!searching && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+              <p className="px-1 text-xs text-[var(--text-tertiary)]">No matches.</p>
+            )}
+            {searchResults.length > 0 && (
+              <div className="max-h-56 space-y-0.5 overflow-y-auto">
+                {searchResults.map((hit) => (
+                  <button
+                    key={hit.id}
+                    type="button"
+                    onClick={() => jumpToMessage(hit.id, hit.created_at)}
+                    className="block w-full rounded-lg border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--surface-soft)] cursor-pointer"
+                  >
+                    <p className="text-xs font-semibold text-[var(--text-primary)]">
+                      {personLabel(hit.author)} · {new Date(hit.created_at).toLocaleDateString()}
+                    </p>
+                    <p className="truncate text-xs text-[var(--text-tertiary)]">{hit.body}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {pinnedMessages.length > 0 && (
           <div className="flex flex-col gap-1 border-b border-[var(--divider)] bg-[var(--surface-soft)] p-2">
             {pinnedMessages.map(({ pin, message }) => (
@@ -761,7 +1072,12 @@ export default function ConversationPage() {
             ))}
           </div>
         )}
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div ref={messagesContainerRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+          <div ref={sentinelRef} />
+          {loadingOlder && <p className="text-center text-xs text-[var(--text-tertiary)]">Loading older messages...</p>}
+          {!hasMoreOlder && messages.length > 0 && (
+            <p className="text-center text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">Start of conversation</p>
+          )}
           {topLevelMessages.map((message, index) => {
             const previous = topLevelMessages[index - 1];
             const dayLabel = formatDayLabel(message.created_at);
@@ -862,16 +1178,23 @@ export default function ConversationPage() {
               {pendingFiles.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {pendingFiles.map((file, i) => (
-                    <div key={`${file.name}-${file.lastModified}-${i}`} className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-                      <span className="max-w-[180px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
-                      <button
-                        type="button"
-                        onClick={() => setPendingFiles((current) => current.filter((_, idx) => idx !== i))}
-                        className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        ✕
-                      </button>
+                    <div key={`${file.name}-${file.lastModified}-${i}`} className="rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+                      <div className="flex items-center gap-2">
+                        <span className="max-w-[180px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                        <button
+                          type="button"
+                          onClick={() => setPendingFiles((current) => current.filter((_, idx) => idx !== i))}
+                          className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {sending && (
+                        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-black/10">
+                          <div className="h-full bg-[#8b5cf6] transition-all" style={{ width: `${uploadProgress.get(fileKey(file)) ?? 0}%` }} />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1005,16 +1328,23 @@ export default function ConversationPage() {
               {pendingReplyFiles.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {pendingReplyFiles.map((file, i) => (
-                    <div key={`${file.name}-${file.lastModified}-${i}`} className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
-                      <span className="max-w-[140px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
-                      <button
-                        type="button"
-                        onClick={() => setPendingReplyFiles((current) => current.filter((_, idx) => idx !== i))}
-                        className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        ✕
-                      </button>
+                    <div key={`${file.name}-${file.lastModified}-${i}`} className="rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
+                      <div className="flex items-center gap-2">
+                        <span className="max-w-[140px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                        <button
+                          type="button"
+                          onClick={() => setPendingReplyFiles((current) => current.filter((_, idx) => idx !== i))}
+                          className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {replySending && (
+                        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-black/10">
+                          <div className="h-full bg-[#8b5cf6] transition-all" style={{ width: `${uploadProgress.get(fileKey(file)) ?? 0}%` }} />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1191,6 +1521,10 @@ function MessageBubble({
             {attachments.map((a) =>
               isImage(a.content_type, a.file_name) ? (
                 <ImageAttachment key={a.id} attachment={a} onOpen={() => onDownloadFile(a)} />
+              ) : isVideo(a.content_type, a.file_name) ? (
+                <MediaAttachment key={a.id} attachment={a} kind="video" />
+              ) : isAudio(a.content_type, a.file_name) ? (
+                <MediaAttachment key={a.id} attachment={a} kind="audio" />
               ) : (
                 <button key={a.id} type="button" onClick={() => onDownloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
                   📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
@@ -1344,6 +1678,34 @@ function ImageAttachment({ attachment, onOpen }: { attachment: Attachment; onOpe
       <img src={url} alt={attachment.file_name} className="max-h-52 max-w-[220px] rounded-lg object-cover" />
     </button>
   );
+}
+
+// Same "fetch the signed URL once, cache it" shape as ImageAttachment, just
+// rendering a native player instead of an <img>.
+function MediaAttachment({ attachment, kind }: { attachment: Attachment; kind: "video" | "audio" }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.storage
+      .from("org-drive")
+      .createSignedUrl(attachment.storage_path, 3600)
+      .then(({ data }) => {
+        if (!cancelled && data) setUrl(data.signedUrl);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.storage_path]);
+
+  if (!url) {
+    return <div className="grid h-16 w-52 place-items-center rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[10px] text-[var(--text-tertiary)]">Loading…</div>;
+  }
+
+  if (kind === "video") {
+    return <video src={url} controls className="max-h-52 max-w-[260px] rounded-lg" />;
+  }
+  return <audio src={url} controls className="max-w-[260px]" />;
 }
 
 function TaskChip({ preview, onOpen }: { preview: TaskPreview | null | undefined; onOpen: () => void }) {
