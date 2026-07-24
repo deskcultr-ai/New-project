@@ -230,20 +230,34 @@ export default function ConversationPage() {
     setSuggestTasks([]);
   }
 
-  async function uploadMessageAttachment(messageId: string, file: File) {
-    if (!profile) return;
+  // Returns the inserted row (not just ok/error) so the caller can append it
+  // to local state directly instead of re-fetching everything.
+  async function uploadMessageAttachment(messageId: string, file: File): Promise<Attachment | null> {
+    if (!profile) return null;
     const path = `${profile.organization_id}/messages/${params.conversationId}/${messageId}/${Date.now()}-${file.name}`;
     const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, file);
-    if (!uploadErr) {
-      await supabase.from("message_attachments").insert({
+    if (uploadErr) return null;
+    const { data, error: insertErr } = await supabase
+      .from("message_attachments")
+      .insert({
         message_id: messageId,
         uploaded_by: profile.id,
         storage_path: path,
         file_name: file.name,
         file_size: file.size,
         content_type: file.type || null,
-      });
-    }
+      })
+      .select("id, message_id, storage_path, file_name, file_size, content_type")
+      .single();
+    if (insertErr) return null;
+    return data as Attachment;
+  }
+
+  function markRead() {
+    if (!profile) return;
+    supabase
+      .from("conversation_reads")
+      .upsert({ conversation_id: params.conversationId, profile_id: profile.id, last_read_at: new Date().toISOString() }, { onConflict: "conversation_id,profile_id" });
   }
 
   async function sendMessage(event: React.FormEvent) {
@@ -253,9 +267,10 @@ export default function ConversationPage() {
     setSending(true);
     setError("");
 
+    const trimmedBody = body.trim();
     const { data: newId, error: sendError } = await supabase.rpc("post_message", {
       p_conversation_id: params.conversationId,
-      p_body: body.trim(),
+      p_body: trimmedBody,
       p_mentioned_ids: mentionedIds,
     });
 
@@ -265,15 +280,35 @@ export default function ConversationPage() {
       return;
     }
 
+    // Append locally right away instead of re-fetching the whole
+    // conversation (messages, every attachment, every reaction, the
+    // directory) on every single send -- that full reload was the main
+    // source of visible lag, and re-mounted every image thumbnail from
+    // scratch each time too. The realtime echo of this same insert (see
+    // the subscription above) already knows to skip it once it's here.
+    const optimisticMessage: MessageRow = {
+      id: newId,
+      conversation_id: params.conversationId,
+      author_id: profile.id,
+      body: trimmedBody,
+      created_at: new Date().toISOString(),
+      reply_to_message_id: null,
+      author: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
+    };
+    setMessages((current) => (current.some((m) => m.id === newId) ? current : [...current, optimisticMessage]));
+    if (trimmedBody) loadTaskPreviews([trimmedBody]);
+
     if (pendingFiles.length > 0) {
-      await Promise.all(pendingFiles.map((file) => uploadMessageAttachment(newId, file)));
+      const uploaded = await Promise.all(pendingFiles.map((file) => uploadMessageAttachment(newId, file)));
+      const newAttachments = uploaded.filter((a): a is Attachment => a !== null);
+      if (newAttachments.length > 0) setAttachments((current) => [...current, ...newAttachments]);
     }
 
+    markRead();
     setBody("");
     setMentionedIds([]);
     setPendingFiles([]);
     setSending(false);
-    load();
   }
 
   async function sendReply(event: React.FormEvent) {
@@ -281,9 +316,10 @@ export default function ConversationPage() {
     if (!profile || !activeThreadId || (!replyBody.trim() && pendingReplyFiles.length === 0)) return;
     setReplySending(true);
 
+    const trimmedBody = replyBody.trim();
     const { data: newId, error: sendError } = await supabase.rpc("post_message", {
       p_conversation_id: params.conversationId,
-      p_body: replyBody.trim(),
+      p_body: trimmedBody,
       p_reply_to_message_id: activeThreadId,
     });
 
@@ -293,14 +329,28 @@ export default function ConversationPage() {
       return;
     }
 
+    const optimisticReply: MessageRow = {
+      id: newId,
+      conversation_id: params.conversationId,
+      author_id: profile.id,
+      body: trimmedBody,
+      created_at: new Date().toISOString(),
+      reply_to_message_id: activeThreadId,
+      author: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
+    };
+    setMessages((current) => (current.some((m) => m.id === newId) ? current : [...current, optimisticReply]));
+    if (trimmedBody) loadTaskPreviews([trimmedBody]);
+
     if (pendingReplyFiles.length > 0) {
-      await Promise.all(pendingReplyFiles.map((file) => uploadMessageAttachment(newId, file)));
+      const uploaded = await Promise.all(pendingReplyFiles.map((file) => uploadMessageAttachment(newId, file)));
+      const newAttachments = uploaded.filter((a): a is Attachment => a !== null);
+      if (newAttachments.length > 0) setAttachments((current) => [...current, ...newAttachments]);
     }
 
+    markRead();
     setReplyBody("");
     setPendingReplyFiles([]);
     setReplySending(false);
-    load();
   }
 
   function addFiles(list: FileList | File[]) {

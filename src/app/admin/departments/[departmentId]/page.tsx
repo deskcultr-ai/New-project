@@ -19,7 +19,7 @@ type PersonStatus = {
   invited_at: string | null;
   confirmed_at: string | null;
 };
-type DeptTask = { id: string; title: string; status: TaskStatus; priority: TaskPriority; due_date: string | null };
+type DeptTask = { id: string; title: string; status: TaskStatus; priority: TaskPriority; due_date: string | null; department_id?: string };
 type ActivityLog = { id: string; action: string; details: Record<string, string>; created_at: string };
 
 const ACTION_LABEL: Record<string, string> = {
@@ -84,6 +84,40 @@ export default function DepartmentDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used throughout the app
     load();
   }, [load]);
+
+  const loadMembers = useCallback(async () => {
+    const { data: peopleRows } = await supabase.rpc("org_people_status");
+    setMembers(((peopleRows ?? []) as PersonStatus[]).filter((p) => p.department_id === params.departmentId));
+  }, [params.departmentId]);
+
+  // Live updates: tasks created/edited/deleted in this department, and
+  // people joining/changing role here, show up without a refresh.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`department-detail:${params.departmentId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks", filter: `department_id=eq.${params.departmentId}` }, (payload) => {
+        const row = payload.new as DeptTask;
+        setTasks((current) => (current.some((t) => t.id === row.id) ? current : [row, ...current]));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks", filter: `department_id=eq.${params.departmentId}` }, (payload) => {
+        const row = payload.new as DeptTask;
+        setTasks((current) => current.map((t) => (t.id === row.id ? row : t)));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks", filter: `department_id=eq.${params.departmentId}` }, (payload) => {
+        const oldRow = payload.old as { id: string };
+        setTasks((current) => current.filter((t) => t.id !== oldRow.id));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "profiles", filter: `department_id=eq.${params.departmentId}` }, () => {
+        loadMembers();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `department_id=eq.${params.departmentId}` }, () => {
+        loadMembers();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [params.departmentId, loadMembers]);
 
   if (!profile) {
     return (

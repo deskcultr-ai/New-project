@@ -56,6 +56,34 @@ export default function DashboardPage() {
     run();
   }, [load]);
 
+  // Live updates for "my tasks": a new/edited/deleted task assigned to me
+  // shows up without a refresh. Note: if a task is reassigned AWAY from me
+  // while I'm looking at this page, it won't disappear until reload -- the
+  // server-side filter below only matches rows where I'm still the
+  // assignee, so there's no event to tell me I lost one.
+  const realtimeProfileId = profile?.id;
+  useEffect(() => {
+    if (!realtimeProfileId) return;
+    const channel = supabase
+      .channel(`my-tasks:${realtimeProfileId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks", filter: `assigned_to=eq.${realtimeProfileId}` }, (payload) => {
+        const row = payload.new as Task;
+        setTasks((current) => (current.some((t) => t.id === row.id) ? current : [...current, row]));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks", filter: `assigned_to=eq.${realtimeProfileId}` }, (payload) => {
+        const row = payload.new as Task;
+        setTasks((current) => (current.some((t) => t.id === row.id) ? current.map((t) => (t.id === row.id ? row : t)) : [...current, row]));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks", filter: `assigned_to=eq.${realtimeProfileId}` }, (payload) => {
+        const oldRow = payload.old as { id: string };
+        setTasks((current) => current.filter((t) => t.id !== oldRow.id));
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [realtimeProfileId]);
+
   async function createOwnTask(event: React.FormEvent) {
     event.preventDefault();
     if (!profile || !newTitle.trim()) return;

@@ -166,6 +166,52 @@ export default function TaskDetailPage() {
     run();
   }, [load]);
 
+  // Refetches only the task row (with its joined department/assignee/creator)
+  // and updates the read-only display -- deliberately does NOT touch the
+  // editable form fields (status/priority/title/etc. below), so a remote
+  // change from someone else never clobbers what you're mid-typing in the
+  // Update form. Your own next Save still applies on top of whatever's
+  // current in the DB, same as any concurrent edit.
+  const refetchTaskDisplay = useCallback(async () => {
+    const { data: taskRow } = await supabase
+      .from("tasks")
+      .select(
+        "id, organization_id, department_id, title, description, status, is_blocked, priority, task_type, due_date, assigned_to, created_by, department:departments(name), assignee:profiles!tasks_assigned_to_fkey(id,full_name,username,email), creator:profiles!tasks_created_by_fkey(id,full_name,username,email)"
+      )
+      .eq("id", params.id)
+      .maybeSingle();
+    if (taskRow) setTask(taskRow as unknown as TaskDetail);
+  }, [params.id]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`task-detail:${params.id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks", filter: `id=eq.${params.id}` }, () => {
+        refetchTaskDisplay();
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks", filter: `id=eq.${params.id}` }, () => {
+        setNotFound(true);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_comments", filter: `task_id=eq.${params.id}` }, async (payload) => {
+        const row = payload.new as { id: string; body: string; created_at: string; author_id: string };
+        const { data: author } = await supabase.from("profiles").select("id, full_name, username, email").eq("id", row.author_id).maybeSingle();
+        setComments((current) => (current.some((c) => c.id === row.id) ? current : [...current, { id: row.id, body: row.body, created_at: row.created_at, author: (author as PersonRef) ?? null }]));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "task_attachments", filter: `task_id=eq.${params.id}` }, async (payload) => {
+        const row = payload.new as { id: string; storage_path: string; file_name: string; file_size: number; content_type: string | null; created_at: string; uploaded_by: string };
+        const { data: uploader } = await supabase.from("profiles").select("id, full_name, username, email").eq("id", row.uploaded_by).maybeSingle();
+        setAttachments((current) =>
+          current.some((a) => a.id === row.id)
+            ? current
+            : [...current, { id: row.id, storage_path: row.storage_path, file_name: row.file_name, file_size: row.file_size, content_type: row.content_type, created_at: row.created_at, uploader: (uploader as PersonRef) ?? null }]
+        );
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [params.id, refetchTaskDisplay]);
+
   const canEditFully = !!profile && ["org_super_admin", "team_leader", "manager"].includes(profile.role);
   // An Executive who created their own task can fully edit it (title/description/
   // priority/due date) -- a task assigned to them by someone else stays status/blocked-only.
@@ -216,7 +262,10 @@ export default function TaskDetailPage() {
       setTaskError(error.message);
       return;
     }
-    load();
+    // Lightweight refetch of just the task row (not comments/attachments/
+    // directory) -- load() here was the same "reload everything" pattern
+    // that made the chat composer feel slow.
+    refetchTaskDisplay();
   }
 
   async function addComment(event: React.FormEvent) {
@@ -225,19 +274,28 @@ export default function TaskDetailPage() {
     setCommentBusy(true);
     setCommentError("");
 
-    const { error } = await supabase.from("task_comments").insert({
-      task_id: task.id,
-      author_id: profile.id,
-      body: commentBody.trim(),
-    });
+    const trimmed = commentBody.trim();
+    const { data, error } = await supabase
+      .from("task_comments")
+      .insert({ task_id: task.id, author_id: profile.id, body: trimmed })
+      .select("id, created_at")
+      .single();
 
     setCommentBusy(false);
-    if (error) {
-      setCommentError(error.message);
+    if (error || !data) {
+      setCommentError(error?.message ?? "Could not post the comment.");
       return;
     }
+    // Appended locally now -- the realtime subscription above will also see
+    // this same insert and skip it (already present by id).
+    const optimistic: Comment = {
+      id: data.id,
+      body: trimmed,
+      created_at: data.created_at,
+      author: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
+    };
+    setComments((current) => (current.some((c) => c.id === optimistic.id) ? current : [...current, optimistic]));
     setCommentBody("");
-    load();
   }
 
   async function uploadFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -255,21 +313,34 @@ export default function TaskDetailPage() {
       return;
     }
 
-    const { error: insertErr } = await supabase.from("task_attachments").insert({
-      task_id: task.id,
-      uploaded_by: profile.id,
+    const { data, error: insertErr } = await supabase
+      .from("task_attachments")
+      .insert({
+        task_id: task.id,
+        uploaded_by: profile.id,
+        storage_path: path,
+        file_name: file.name,
+        file_size: file.size,
+        content_type: file.type || null,
+      })
+      .select("id, created_at")
+      .single();
+
+    setUploadBusy(false);
+    if (insertErr || !data) {
+      setUploadError(insertErr?.message ?? "Could not attach the file.");
+      return;
+    }
+    const optimistic: Attachment = {
+      id: data.id,
       storage_path: path,
       file_name: file.name,
       file_size: file.size,
       content_type: file.type || null,
-    });
-
-    setUploadBusy(false);
-    if (insertErr) {
-      setUploadError(insertErr.message);
-      return;
-    }
-    load();
+      created_at: data.created_at,
+      uploader: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
+    };
+    setAttachments((current) => (current.some((a) => a.id === optimistic.id) ? current : [...current, optimistic]));
   }
 
   async function openFile(attachment: Attachment) {

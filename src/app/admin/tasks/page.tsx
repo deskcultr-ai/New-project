@@ -106,6 +106,33 @@ export default function AdminTasksPage() {
     run();
   }, [load]);
 
+  // Live updates for the board itself -- a task created/edited/deleted by
+  // anyone (Team Leader, Manager, another tab) shows up without a refresh.
+  // RLS still applies to what this subscription can actually see; the
+  // organization_id filter is just a pre-filter to cut noise.
+  const realtimeOrgId = profile?.organization_id;
+  useEffect(() => {
+    if (!realtimeOrgId) return;
+    const channel = supabase
+      .channel(`org-tasks:${realtimeOrgId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tasks", filter: `organization_id=eq.${realtimeOrgId}` }, (payload) => {
+        const row = payload.new as Task;
+        setTasks((current) => (current.some((t) => t.id === row.id) ? current : [...current, row]));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "tasks", filter: `organization_id=eq.${realtimeOrgId}` }, (payload) => {
+        const row = payload.new as Task;
+        setTasks((current) => (current.some((t) => t.id === row.id) ? current.map((t) => (t.id === row.id ? row : t)) : [...current, row]));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "tasks", filter: `organization_id=eq.${realtimeOrgId}` }, (payload) => {
+        const oldRow = payload.old as { id: string };
+        setTasks((current) => current.filter((t) => t.id !== oldRow.id));
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [realtimeOrgId]);
+
   async function createTask(event: React.FormEvent) {
     event.preventDefault();
     if (!profile || !title.trim() || !departmentId) return;

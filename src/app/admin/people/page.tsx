@@ -60,6 +60,15 @@ export default function AdminPeoplePage() {
   const [managerAssignBusyId, setManagerAssignBusyId] = useState<string | null>(null);
   const [managerAssignError, setManagerAssignError] = useState("");
 
+  const loadPeople = useCallback(async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    const response = await fetch("/api/invites", { headers: { Authorization: `Bearer ${token}` } });
+    const result = await response.json();
+    if (response.ok) setPeople(result.people);
+  }, []);
+
   const load = useCallback(async () => {
     const me = await getProfile();
     if (!me) {
@@ -78,16 +87,9 @@ export default function AdminPeoplePage() {
     if ((me.role === "team_leader" || me.role === "manager") && me.department_id) setInviteDeptId(me.department_id);
     if (me.role === "org_super_admin") setInviteRole("team_leader");
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-    if (token) {
-      const response = await fetch("/api/invites", { headers: { Authorization: `Bearer ${token}` } });
-      const result = await response.json();
-      if (response.ok) setPeople(result.people);
-    }
-
+    await loadPeople();
     setLoading(false);
-  }, [router]);
+  }, [router, loadPeople]);
 
   useEffect(() => {
     async function run() {
@@ -95,6 +97,37 @@ export default function AdminPeoplePage() {
     }
     run();
   }, [load]);
+
+  // Live updates: a department created/deleted by the Org Super Admin (or
+  // anyone's role/department/manager change from an invite or reassignment)
+  // shows up without a refresh. `org_people_status()` also blends in
+  // auth.users.confirmed_at/invited_at, which a profiles realtime payload
+  // can't see -- so a profiles change re-fetches the directory endpoint
+  // rather than trying to patch it in client-side.
+  const realtimeOrgId = profile?.organization_id;
+  useEffect(() => {
+    if (!realtimeOrgId) return;
+    const channel = supabase
+      .channel(`org-people:${realtimeOrgId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "departments", filter: `organization_id=eq.${realtimeOrgId}` }, (payload) => {
+        const row = payload.new as Department;
+        setDepartments((current) => (current.some((d) => d.id === row.id) ? current : [...current, row].sort((a, b) => a.name.localeCompare(b.name))));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "departments", filter: `organization_id=eq.${realtimeOrgId}` }, (payload) => {
+        const oldRow = payload.old as { id: string };
+        setDepartments((current) => current.filter((d) => d.id !== oldRow.id));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "profiles", filter: `organization_id=eq.${realtimeOrgId}` }, () => {
+        loadPeople();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `organization_id=eq.${realtimeOrgId}` }, () => {
+        loadPeople();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [realtimeOrgId, loadPeople]);
 
   async function createDepartment(event: React.FormEvent) {
     event.preventDefault();
