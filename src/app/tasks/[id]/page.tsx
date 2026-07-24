@@ -170,6 +170,25 @@ export default function TaskDetailPage() {
   // An Executive who created their own task can fully edit it (title/description/
   // priority/due date) -- a task assigned to them by someone else stays status/blocked-only.
   const canEditOwnTask = !!profile && profile.role === "executive" && task?.created_by === profile.id;
+  // Deleting a task is Org Super Admin only -- enforced at the RLS level
+  // (only org_super_admin delete tasks), this just gives them a way to do it.
+  const canDelete = profile?.role === "org_super_admin";
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function deleteTask() {
+    if (!task) return;
+    if (!window.confirm(`Delete "${task.title}" permanently? This cannot be undone.`)) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    const { error } = await supabase.from("tasks").delete().eq("id", task.id);
+    if (error) {
+      setDeleteBusy(false);
+      setDeleteError(error.message);
+      return;
+    }
+    router.push("/admin/tasks");
+  }
 
   async function saveTask(event: React.FormEvent) {
     event.preventDefault();
@@ -307,9 +326,21 @@ export default function TaskDetailPage() {
   const personLabel = (person: PersonRef) => (person ? (person.username ? `@${person.username}` : person.full_name || person.email) : "Unassigned");
 
   return (
-    <AppShell profile={profile} title={task.title} subtitle={task.department?.name ?? undefined}>
+    <AppShell
+      profile={profile}
+      title={task.title}
+      subtitle={task.department?.name ?? undefined}
+      actions={
+        canDelete && (
+          <Button variant="ghost" disabled={deleteBusy} onClick={deleteTask} className="text-red-500 hover:bg-red-500/10">
+            {deleteBusy ? "Deleting..." : "Delete task"}
+          </Button>
+        )
+      }
+    >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="space-y-6">
+          {deleteError && <Alert tone="danger">{deleteError}</Alert>}
           <Card>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={PRIORITY_TONE[task.priority]}>{PRIORITY_LABEL[task.priority]}</Badge>

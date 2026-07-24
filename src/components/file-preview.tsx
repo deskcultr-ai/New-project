@@ -10,7 +10,7 @@ export function useFilePreview() {
   return { target, open: setTarget, close: () => setTarget(null) };
 }
 
-function isImage(contentType?: string | null, name?: string) {
+export function isImage(contentType?: string | null, name?: string) {
   if (contentType?.startsWith("image/")) return true;
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(name ?? "");
 }

@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getProfile, type Profile } from "@/lib/session";
 import { Button, Badge, Avatar } from "@/components/ui";
-import { FilePreviewModal, useFilePreview } from "@/components/file-preview";
+import { FilePreviewModal, useFilePreview, isImage } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
 import { parseMessageBody, taskToken, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
 
@@ -48,7 +48,8 @@ export default function ConversationPage() {
   const [mentionedIds, setMentionedIds] = useState<string[]>([]);
   const [suggestMentions, setSuggestMentions] = useState<DirectoryPerson[]>([]);
   const [suggestTasks, setSuggestTasks] = useState<TaskSuggestion[]>([]);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -56,7 +57,8 @@ export default function ConversationPage() {
 
   const [replyBody, setReplyBody] = useState("");
   const [replySending, setReplySending] = useState(false);
-  const [pendingReplyFile, setPendingReplyFile] = useState<File | null>(null);
+  const [pendingReplyFiles, setPendingReplyFiles] = useState<File[]>([]);
+  const [replyDragOver, setReplyDragOver] = useState(false);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const threadBottomRef = useRef<HTMLDivElement>(null);
 
@@ -246,7 +248,8 @@ export default function ConversationPage() {
 
   async function sendMessage(event: React.FormEvent) {
     event.preventDefault();
-    if (!profile || !body.trim()) return;
+    // An attachment alone is a valid message -- WhatsApp-style, no caption required.
+    if (!profile || (!body.trim() && pendingFiles.length === 0)) return;
     setSending(true);
     setError("");
 
@@ -262,18 +265,20 @@ export default function ConversationPage() {
       return;
     }
 
-    if (pendingFile) await uploadMessageAttachment(newId, pendingFile);
+    if (pendingFiles.length > 0) {
+      await Promise.all(pendingFiles.map((file) => uploadMessageAttachment(newId, file)));
+    }
 
     setBody("");
     setMentionedIds([]);
-    setPendingFile(null);
+    setPendingFiles([]);
     setSending(false);
     load();
   }
 
   async function sendReply(event: React.FormEvent) {
     event.preventDefault();
-    if (!profile || !activeThreadId || !replyBody.trim()) return;
+    if (!profile || !activeThreadId || (!replyBody.trim() && pendingReplyFiles.length === 0)) return;
     setReplySending(true);
 
     const { data: newId, error: sendError } = await supabase.rpc("post_message", {
@@ -288,12 +293,22 @@ export default function ConversationPage() {
       return;
     }
 
-    if (pendingReplyFile) await uploadMessageAttachment(newId, pendingReplyFile);
+    if (pendingReplyFiles.length > 0) {
+      await Promise.all(pendingReplyFiles.map((file) => uploadMessageAttachment(newId, file)));
+    }
 
     setReplyBody("");
-    setPendingReplyFile(null);
+    setPendingReplyFiles([]);
     setReplySending(false);
     load();
+  }
+
+  function addFiles(list: FileList | File[]) {
+    setPendingFiles((current) => [...current, ...Array.from(list)]);
+  }
+
+  function addReplyFiles(list: FileList | File[]) {
+    setPendingReplyFiles((current) => [...current, ...Array.from(list)]);
   }
 
   // Enter sends (matches every chat app); Shift+Enter still inserts a
@@ -376,7 +391,13 @@ export default function ConversationPage() {
           {!canPost ? (
             <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Organization Super Admin can post to Announcements.</p>
           ) : (
-            <form onSubmit={sendMessage} className="space-y-2">
+            <form
+              onSubmit={sendMessage}
+              className={`space-y-2 rounded-xl transition ${dragOver ? "ring-2 ring-[#8b5cf6] ring-offset-2 ring-offset-[var(--background)]" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files); }}
+            >
               <div className="relative">
                 {suggestMentions.length > 0 && (
                   <div className="absolute bottom-full mb-1 w-full max-w-xs glass-panel shadow-lg">
@@ -405,38 +426,43 @@ export default function ConversationPage() {
                   className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
                 />
               </div>
-              {pendingFile && (
-                <div className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-                  <span className="truncate">📎 {pendingFile.name} ({(pendingFile.size / 1024).toFixed(0)} KB)</span>
-                  <button
-                    type="button"
-                    onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-                    className="ml-auto shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
-                    aria-label="Remove attachment"
-                  >
-                    ✕
-                  </button>
+              {pendingFiles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {pendingFiles.map((file, i) => (
+                    <div key={`${file.name}-${file.lastModified}-${i}`} className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+                      <span className="max-w-[180px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingFiles((current) => current.filter((_, idx) => idx !== i))}
+                        className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="flex items-center justify-between gap-3">
                 <input
                   ref={fileInputRef}
                   type="file"
-                  onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+                  multiple
+                  onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
                   className="hidden"
                 />
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Attach an image, video, or file"
-                  aria-label="Attach a file"
+                  title="Attach images, videos, or files (or drag & drop them here)"
+                  aria-label="Attach files"
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)] hover:text-primary hover:border-primary/40 cursor-pointer transition"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
                   </svg>
                 </button>
-                <Button type="submit" disabled={sending || !body.trim()}>
+                <Button type="submit" disabled={sending || (!body.trim() && pendingFiles.length === 0)}>
                   {sending ? "Sending..." : "Send"}
                 </Button>
               </div>
@@ -494,7 +520,13 @@ export default function ConversationPage() {
             <div ref={threadBottomRef} />
           </div>
           {canPost && (
-            <form onSubmit={sendReply} className="border-t border-[var(--divider)] p-3">
+            <form
+              onSubmit={sendReply}
+              className={`border-t border-[var(--divider)] p-3 transition ${replyDragOver ? "ring-2 ring-inset ring-[#8b5cf6]" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setReplyDragOver(true); }}
+              onDragLeave={() => setReplyDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setReplyDragOver(false); if (e.dataTransfer.files.length > 0) addReplyFiles(e.dataTransfer.files); }}
+            >
               <textarea
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
@@ -503,38 +535,43 @@ export default function ConversationPage() {
                 placeholder="Reply in thread... Enter to send"
                 className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
-              {pendingReplyFile && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
-                  <span className="truncate">📎 {pendingReplyFile.name} ({(pendingReplyFile.size / 1024).toFixed(0)} KB)</span>
-                  <button
-                    type="button"
-                    onClick={() => { setPendingReplyFile(null); if (replyFileInputRef.current) replyFileInputRef.current.value = ""; }}
-                    className="ml-auto shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
-                    aria-label="Remove attachment"
-                  >
-                    ✕
-                  </button>
+              {pendingReplyFiles.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {pendingReplyFiles.map((file, i) => (
+                    <div key={`${file.name}-${file.lastModified}-${i}`} className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
+                      <span className="max-w-[140px] truncate">📎 {file.name} ({(file.size / 1024).toFixed(0)} KB)</span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingReplyFiles((current) => current.filter((_, idx) => idx !== i))}
+                        className="shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="mt-2 flex items-center gap-2">
                 <input
                   ref={replyFileInputRef}
                   type="file"
-                  onChange={(e) => setPendingReplyFile(e.target.files?.[0] ?? null)}
+                  multiple
+                  onChange={(e) => { if (e.target.files) addReplyFiles(e.target.files); e.target.value = ""; }}
                   className="hidden"
                 />
                 <button
                   type="button"
                   onClick={() => replyFileInputRef.current?.click()}
-                  title="Attach an image, video, or file"
-                  aria-label="Attach a file"
+                  title="Attach images, videos, or files (or drag & drop them here)"
+                  aria-label="Attach files"
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)] hover:text-primary hover:border-primary/40 cursor-pointer transition"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
                   </svg>
                 </button>
-                <Button type="submit" disabled={replySending || !replyBody.trim()} className="h-9 flex-1">
+                <Button type="submit" disabled={replySending || (!replyBody.trim() && pendingReplyFiles.length === 0)} className="h-9 flex-1">
                   {replySending ? "Sending..." : "Reply"}
                 </Button>
               </div>
@@ -582,22 +619,28 @@ function MessageBubble({
         <p className="text-xs font-semibold text-[var(--text-secondary)]">
           {personLabel(message.author)} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </p>
-        <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${!compact && isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
-          {parseMessageBody(message.body).map((segment, i) =>
-            segment.type === "text" ? (
-              <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
-            ) : (
-              <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => onOpenTask(segment.id)} />
-            )
-          )}
-        </div>
+        {message.body.trim().length > 0 && (
+          <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${!compact && isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
+            {parseMessageBody(message.body).map((segment, i) =>
+              segment.type === "text" ? (
+                <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
+              ) : (
+                <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => onOpenTask(segment.id)} />
+              )
+            )}
+          </div>
+        )}
         {attachments.length > 0 && (
-          <div className="mt-1 space-y-1">
-            {attachments.map((a) => (
-              <button key={a.id} type="button" onClick={() => onDownloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
-                📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
-              </button>
-            ))}
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {attachments.map((a) =>
+              isImage(a.content_type, a.file_name) ? (
+                <ImageAttachment key={a.id} attachment={a} onOpen={() => onDownloadFile(a)} />
+              ) : (
+                <button key={a.id} type="button" onClick={() => onDownloadFile(a)} className="block text-xs font-semibold text-primary hover:underline bg-transparent border-0 cursor-pointer">
+                  📎 {a.file_name} ({(a.file_size / 1024).toFixed(0)} KB)
+                </button>
+              )
+            )}
           </div>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -629,6 +672,38 @@ function MessageBubble({
         </div>
       </div>
     </div>
+  );
+}
+
+// Renders a real <img> (not just a "download" link) so the browser's native
+// right-click "Copy image" / "Save image as" works directly on it, the same
+// way it does on an inline WhatsApp image -- the signed URL is fetched once
+// per attachment since the private org-drive bucket has no public URLs.
+function ImageAttachment({ attachment, onOpen }: { attachment: Attachment; onOpen: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.storage
+      .from("org-drive")
+      .createSignedUrl(attachment.storage_path, 3600)
+      .then(({ data }) => {
+        if (!cancelled && data) setUrl(data.signedUrl);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.storage_path]);
+
+  if (!url) {
+    return <div className="grid h-28 w-28 place-items-center rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[10px] text-[var(--text-tertiary)]">Loading…</div>;
+  }
+
+  return (
+    <button type="button" onClick={onOpen} className="block cursor-pointer overflow-hidden rounded-lg border-0 bg-transparent p-0">
+      {/* eslint-disable-next-line @next/next/no-img-element -- signed Supabase Storage URL, next/image can't proxy this */}
+      <img src={url} alt={attachment.file_name} className="max-h-52 max-w-[220px] rounded-lg object-cover" />
+    </button>
   );
 }
 
