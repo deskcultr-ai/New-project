@@ -17,6 +17,8 @@ export type Message = {
   body: string;
   created_at: string;
   edited_at: string | null;
+  deleted_at: string | null;
+  deleted_for_everyone: boolean;
 };
 
 const TASK_TOKEN_RE = /\[\[task:([0-9a-f-]{36})\]\]/gi;
@@ -40,3 +42,18 @@ export function taskToken(id: string): string {
 }
 
 export const REACTION_EMOJI = ["👍", "❤️", "😂", "🎉", "👀"];
+
+/** "Today" / "Yesterday" / a localized date, for date-separator rows in a message list. */
+export function formatDayLabel(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
+}

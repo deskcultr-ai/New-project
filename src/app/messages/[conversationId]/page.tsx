@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getProfile, type Profile } from "@/lib/session";
-import { Button, Badge, Avatar } from "@/components/ui";
+import { getProfile, displayName, type Profile } from "@/lib/session";
+import { Button, Badge, Avatar, Modal, Alert } from "@/components/ui";
 import { FilePreviewModal, useFilePreview, isImage } from "@/components/file-preview";
 import { uploadFileWithRetry } from "@/lib/storage-upload";
-import { parseMessageBody, taskToken, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
+import { parseMessageBody, taskToken, formatDayLabel, REACTION_EMOJI, type ConversationType } from "@/lib/messaging";
+
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+const GROUP_GAP_MS = 5 * 60 * 1000;
 
 type PersonRef = { id: string; full_name: string | null; username: string | null; email: string } | null;
 type MessageRow = {
@@ -16,14 +19,21 @@ type MessageRow = {
   author_id: string;
   body: string;
   created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+  deleted_for_everyone: boolean;
   reply_to_message_id: string | null;
   author: PersonRef;
 };
 type Attachment = { id: string; message_id: string; storage_path: string; file_name: string; file_size: number; content_type: string | null };
 type Reaction = { id: string; message_id: string; profile_id: string; emoji: string };
+type MessageRead = { message_id: string; profile_id: string; read_at: string };
+type MessagePin = { id: string; conversation_id: string; message_id: string; pinned_by: string | null; pinned_at: string };
 type TaskPreview = { id: string; title: string; status: string };
 type DirectoryPerson = { id: string; full_name: string | null; email: string };
 type TaskSuggestion = { id: string; title: string };
+type ForwardTarget = { id: string; label: string };
+type ConversationRow = { id: string; type: ConversationType; department_id: string | null; dm_profile_a: string | null; dm_profile_b: string | null };
 
 function personLabel(person: PersonRef) {
   if (!person) return "?";
@@ -40,9 +50,26 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [reactions, setReactions] = useState<Reaction[]>([]);
+  const [reads, setReads] = useState<MessageRead[]>([]);
+  const [pins, setPins] = useState<MessagePin[]>([]);
   const [taskPreviews, setTaskPreviews] = useState<Record<string, TaskPreview | null>>({});
   const [directory, setDirectory] = useState<DirectoryPerson[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
+
+  const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ForwardTarget[]>([]);
+  const [forwardBusy, setForwardBusy] = useState(false);
+
+  const [typingNames, setTypingNames] = useState<Map<string, string>>(new Map());
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastTypingSentRef = useRef(0);
+  const stopTypingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const [body, setBody] = useState("");
   const [mentionedIds, setMentionedIds] = useState<string[]>([]);
@@ -61,6 +88,11 @@ export default function ConversationPage() {
   const [replyDragOver, setReplyDragOver] = useState(false);
   const replyFileInputRef = useRef<HTMLInputElement>(null);
   const threadBottomRef = useRef<HTMLDivElement>(null);
+
+  function flashError(message: string) {
+    setActionError(message);
+    setTimeout(() => setActionError(""), 4000);
+  }
 
   const loadTaskPreviews = useCallback(async (bodies: string[]) => {
     const ids = new Set<string>();
@@ -101,25 +133,38 @@ export default function ConversationPage() {
 
     const { data: messageRows } = await supabase
       .from("messages")
-      .select("id, conversation_id, author_id, body, created_at, reply_to_message_id, author:profiles(id,full_name,username,email)")
+      .select("id, conversation_id, author_id, body, created_at, edited_at, deleted_at, deleted_for_everyone, reply_to_message_id, author:profiles(id,full_name,username,email)")
       .eq("conversation_id", params.conversationId)
       .order("created_at", { ascending: true });
-    const rows = (messageRows ?? []) as unknown as MessageRow[];
+    const allRows = (messageRows ?? []) as unknown as MessageRow[];
+
+    const { data: hiddenRows } = await supabase.from("message_hidden_for").select("message_id").eq("profile_id", me.id);
+    const hiddenSet = new Set((hiddenRows ?? []).map((r) => r.message_id as string));
+    const rows = allRows.filter((r) => !hiddenSet.has(r.id));
     setMessages(rows);
     loadTaskPreviews(rows.map((r) => r.body));
 
-    const messageIds = rows.map((r) => r.id);
+    const messageIds = allRows.map((r) => r.id);
     if (messageIds.length > 0) {
-      const [{ data: attachmentRows }, { data: reactionRows }] = await Promise.all([
+      const [{ data: attachmentRows }, { data: reactionRows }, { data: readRows }] = await Promise.all([
         supabase.from("message_attachments").select("id, message_id, storage_path, file_name, file_size, content_type").in("message_id", messageIds),
         supabase.from("message_reactions").select("id, message_id, profile_id, emoji").in("message_id", messageIds),
+        supabase.from("message_reads").select("message_id, profile_id, read_at").in("message_id", messageIds),
       ]);
       setAttachments((attachmentRows ?? []) as Attachment[]);
       setReactions((reactionRows ?? []) as Reaction[]);
+      setReads((readRows ?? []) as MessageRead[]);
     } else {
       setAttachments([]);
       setReactions([]);
+      setReads([]);
     }
+
+    const { data: pinRows } = await supabase
+      .from("message_pins")
+      .select("id, conversation_id, message_id, pinned_by, pinned_at")
+      .eq("conversation_id", params.conversationId);
+    setPins((pinRows ?? []) as MessagePin[]);
 
     const { data: directoryData } = await supabase.from("profiles").select("id, full_name, email").neq("id", me.id).order("full_name");
     setDirectory((directoryData ?? []) as DirectoryPerson[]);
@@ -164,6 +209,23 @@ export default function ConversationPage() {
           }
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages", filter: `conversation_id=eq.${params.conversationId}` },
+        (payload) => {
+          const row = payload.new as MessageRow;
+          // Edits/deletes come through as UPDATEs -- merge in place rather
+          // than replacing the whole row, since this payload has no joined
+          // `author` object the way the initial load/INSERT handler does.
+          setMessages((current) =>
+            current.map((m) =>
+              m.id === row.id
+                ? { ...m, body: row.body, edited_at: row.edited_at, deleted_at: row.deleted_at, deleted_for_everyone: row.deleted_for_everyone }
+                : m
+            )
+          );
+        }
+      )
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, (payload) => {
         const row = payload.new as Reaction;
         // Same race as messages: toggleReaction() already appends its own
@@ -173,16 +235,90 @@ export default function ConversationPage() {
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, (payload) => {
         setReactions((current) => current.filter((r) => r.id !== (payload.old as Reaction).id));
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
+        const row = payload.new as MessageRead;
+        setReads((current) => (current.some((r) => r.message_id === row.message_id && r.profile_id === row.profile_id) ? current : [...current, row]));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_pins" }, (payload) => {
+        const row = payload.new as MessagePin;
+        if (row.conversation_id !== params.conversationId) return;
+        setPins((current) => (current.some((p) => p.id === row.id) ? current : [...current, row]));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_pins" }, (payload) => {
+        setPins((current) => current.filter((p) => p.id !== (payload.old as MessagePin).id));
+      })
+      .on("broadcast", { event: "typing" }, (payload) => {
+        const { profileId, name, typing } = payload.payload as { profileId: string; name: string; typing: boolean };
+        if (profileId === profile?.id) return;
+        const timeouts = typingTimeoutsRef.current;
+        const existing = timeouts.get(profileId);
+        if (existing) clearTimeout(existing);
+        if (!typing) {
+          timeouts.delete(profileId);
+          setTypingNames((current) => {
+            if (!current.has(profileId)) return current;
+            const next = new Map(current);
+            next.delete(profileId);
+            return next;
+          });
+          return;
+        }
+        setTypingNames((current) => new Map(current).set(profileId, name));
+        timeouts.set(
+          profileId,
+          setTimeout(() => {
+            timeouts.delete(profileId);
+            setTypingNames((current) => {
+              const next = new Map(current);
+              next.delete(profileId);
+              return next;
+            });
+          }, 3000)
+        );
+      })
       .subscribe();
+
+    channelRef.current = channel;
+    const timeouts = typingTimeoutsRef.current;
 
     return () => {
       supabase.removeChannel(channel);
+      channelRef.current = null;
+      timeouts.forEach((t) => clearTimeout(t));
+      timeouts.clear();
     };
+    // profile.id is intentionally omitted -- the typing broadcast handler
+    // reads it via the `profile?.id` closure above, and re-subscribing the
+    // whole channel every time profile loads would drop other realtime
+    // state; profile is set once per page load, well before anyone types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.conversationId, loadTaskPreviews]);
+
+  // Read receipts: batch-mark every currently-loaded message not authored by
+  // me as read, debounced, instead of one write per message per render.
+  useEffect(() => {
+    if (!profile) return;
+    const toMark = messages
+      .filter((m) => m.author_id !== profile.id && !m.deleted_for_everyone)
+      .filter((m) => !reads.some((r) => r.message_id === m.id && r.profile_id === profile.id))
+      .map((m) => m.id);
+    if (toMark.length === 0) return;
+    const timeout = setTimeout(async () => {
+      const rows = toMark.map((id) => ({ message_id: id, profile_id: profile.id }));
+      const { error: readErr } = await supabase.from("message_reads").upsert(rows, { onConflict: "message_id,profile_id", ignoreDuplicates: true });
+      if (!readErr) {
+        setReads((current) => [...current, ...toMark.map((id) => ({ message_id: id, profile_id: profile.id, read_at: new Date().toISOString() }))]);
+      }
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [messages, reads, profile]);
 
   const topLevelMessages = messages.filter((m) => !m.reply_to_message_id);
   const activeThread = activeThreadId ? messages.find((m) => m.id === activeThreadId) ?? null : null;
   const threadReplies = activeThreadId ? messages.filter((m) => m.reply_to_message_id === activeThreadId) : [];
+  const pinnedMessages = pins
+    .map((p) => ({ pin: p, message: messages.find((m) => m.id === p.message_id) }))
+    .filter((p): p is { pin: MessagePin; message: MessageRow } => !!p.message);
 
   function replyCount(messageId: string) {
     return messages.filter((m) => m.reply_to_message_id === messageId).length;
@@ -195,6 +331,15 @@ export default function ConversationPage() {
   useEffect(() => {
     threadBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [threadReplies.length, activeThreadId]);
+
+  function scrollToMessage(messageId: string) {
+    document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function sendTyping(typing: boolean) {
+    if (!profile) return;
+    channelRef.current?.send({ type: "broadcast", event: "typing", payload: { profileId: profile.id, name: displayName(profile), typing } });
+  }
 
   function onBodyChange(value: string) {
     setBody(value);
@@ -217,6 +362,19 @@ export default function ConversationPage() {
     } else {
       setSuggestTasks([]);
     }
+
+    if (!value) {
+      if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+      sendTyping(false);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 2000) {
+      lastTypingSentRef.current = now;
+      sendTyping(true);
+    }
+    if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+    stopTypingTimeoutRef.current = setTimeout(() => sendTyping(false), 3000);
   }
 
   function pickMention(person: DirectoryPerson) {
@@ -292,6 +450,9 @@ export default function ConversationPage() {
       author_id: profile.id,
       body: trimmedBody,
       created_at: new Date().toISOString(),
+      edited_at: null,
+      deleted_at: null,
+      deleted_for_everyone: false,
       reply_to_message_id: null,
       author: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
     };
@@ -309,6 +470,8 @@ export default function ConversationPage() {
     setMentionedIds([]);
     setPendingFiles([]);
     setSending(false);
+    if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+    sendTyping(false);
   }
 
   async function sendReply(event: React.FormEvent) {
@@ -335,6 +498,9 @@ export default function ConversationPage() {
       author_id: profile.id,
       body: trimmedBody,
       created_at: new Date().toISOString(),
+      edited_at: null,
+      deleted_at: null,
+      deleted_for_everyone: false,
       reply_to_message_id: activeThreadId,
       author: { id: profile.id, full_name: profile.full_name, username: profile.username, email: profile.email },
     };
@@ -388,6 +554,158 @@ export default function ConversationPage() {
     }
   }
 
+  function canEditMessage(message: MessageRow): boolean {
+    if (!profile) return false;
+    if (message.deleted_for_everyone) return false;
+    if (profile.role === "org_super_admin") return true;
+    // This is a display-only heuristic -- the RLS policy on `messages` is the
+    // actual enforcement of the 15-minute window (server clock, not this
+    // one), so an occasionally-stale menu item here has no security effect.
+    // eslint-disable-next-line react-hooks/purity -- see comment above
+    return message.author_id === profile.id && Date.now() - new Date(message.created_at).getTime() < EDIT_WINDOW_MS;
+  }
+
+  function canDeleteForEveryone(message: MessageRow): boolean {
+    return canEditMessage(message);
+  }
+
+  function startEdit(message: MessageRow) {
+    setEditingId(message.id);
+    setEditBody(message.body);
+    setOpenMenuId(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditBody("");
+  }
+
+  async function saveEdit(messageId: string) {
+    const trimmed = editBody.trim();
+    if (!trimmed) return;
+    const nowIso = new Date().toISOString();
+    const { error: updErr } = await supabase.from("messages").update({ body: trimmed, edited_at: nowIso }).eq("id", messageId);
+    if (updErr) {
+      flashError(updErr.message);
+      return;
+    }
+    setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, body: trimmed, edited_at: nowIso } : m)));
+    setEditingId(null);
+    setEditBody("");
+  }
+
+  async function deleteForMe(messageId: string) {
+    if (!profile) return;
+    if (!window.confirm("Delete this message for you? Others will still see it.")) return;
+    const { error: delErr } = await supabase.from("message_hidden_for").insert({ message_id: messageId, profile_id: profile.id });
+    if (delErr) {
+      flashError(delErr.message);
+      return;
+    }
+    setMessages((current) => current.filter((m) => m.id !== messageId));
+    setOpenMenuId(null);
+  }
+
+  async function deleteForEveryone(messageId: string) {
+    if (!window.confirm("Delete this message for everyone? This cannot be undone.")) return;
+    const nowIso = new Date().toISOString();
+    const { error: delErr } = await supabase.from("messages").update({ deleted_at: nowIso, deleted_for_everyone: true }).eq("id", messageId);
+    if (delErr) {
+      flashError(delErr.message);
+      return;
+    }
+    setMessages((current) => current.map((m) => (m.id === messageId ? { ...m, deleted_at: nowIso, deleted_for_everyone: true } : m)));
+    setOpenMenuId(null);
+  }
+
+  async function togglePin(messageId: string) {
+    if (!profile) return;
+    setOpenMenuId(null);
+    const existing = pins.find((p) => p.message_id === messageId);
+    if (existing) {
+      await supabase.from("message_pins").delete().eq("id", existing.id);
+      setPins((current) => current.filter((p) => p.id !== existing.id));
+      return;
+    }
+    const { data, error: pinErr } = await supabase
+      .from("message_pins")
+      .insert({ conversation_id: params.conversationId, message_id: messageId, pinned_by: profile.id })
+      .select("id, conversation_id, message_id, pinned_by, pinned_at")
+      .single();
+    if (pinErr) {
+      flashError(pinErr.message.includes("at most 3") ? pinErr.message : "Could not pin this message.");
+      return;
+    }
+    if (data) setPins((current) => [...current, data as MessagePin]);
+  }
+
+  async function loadForwardTargets() {
+    if (!profile) return;
+    const [{ data: depts }, { data: convos }] = await Promise.all([
+      supabase.from("departments").select("id, name").eq("organization_id", profile.organization_id),
+      supabase.from("conversations").select("id, type, department_id, dm_profile_a, dm_profile_b"),
+    ]);
+    const rows = (convos ?? []) as ConversationRow[];
+    const dmOtherIds = rows
+      .filter((c) => c.type === "dm")
+      .map((c) => (c.dm_profile_a === profile.id ? c.dm_profile_b : c.dm_profile_a))
+      .filter((id): id is string => !!id);
+    const { data: dmPeople } = dmOtherIds.length
+      ? await supabase.from("profiles").select("id, full_name, email").in("id", dmOtherIds)
+      : { data: [] as DirectoryPerson[] };
+    const deptName = (id: string | null) => (depts ?? []).find((d) => d.id === id)?.name ?? "Department";
+    const built: ForwardTarget[] = rows
+      .filter((c) => c.id !== params.conversationId)
+      .map((c) => {
+        if (c.type === "announcement") return { id: c.id, label: "Announcements" };
+        if (c.type === "department_channel") return { id: c.id, label: deptName(c.department_id) };
+        const otherId = c.dm_profile_a === profile.id ? c.dm_profile_b! : c.dm_profile_a!;
+        const other = (dmPeople ?? []).find((p) => p.id === otherId);
+        return { id: c.id, label: other?.full_name || other?.email || "Direct message" };
+      });
+    setForwardTargets(built);
+  }
+
+  function openForward(messageId: string) {
+    setForwardMessageId(messageId);
+    setOpenMenuId(null);
+    if (forwardTargets.length === 0) loadForwardTargets();
+  }
+
+  async function forwardTo(targetConversationId: string) {
+    if (!profile || !forwardMessageId) return;
+    const source = messages.find((m) => m.id === forwardMessageId);
+    if (!source) return;
+    setForwardBusy(true);
+    const { data: newId, error: sendErr } = await supabase.rpc("post_message", {
+      p_conversation_id: targetConversationId,
+      p_body: source.body,
+    });
+    if (!sendErr && newId) {
+      const sourceAttachments = attachments.filter((a) => a.message_id === forwardMessageId);
+      if (sourceAttachments.length > 0) {
+        await supabase.from("message_attachments").insert(
+          sourceAttachments.map((a) => ({
+            message_id: newId,
+            uploaded_by: profile.id,
+            storage_path: a.storage_path,
+            file_name: a.file_name,
+            file_size: a.file_size,
+            content_type: a.content_type,
+          }))
+        );
+      }
+    }
+    setForwardBusy(false);
+    setForwardMessageId(null);
+    if (sendErr) flashError(sendErr.message);
+  }
+
+  function copyMessageText(text: string) {
+    navigator.clipboard?.writeText(text);
+    setOpenMenuId(null);
+  }
+
   const preview = useFilePreview();
 
   async function downloadFile(attachment: Attachment) {
@@ -412,32 +730,96 @@ export default function ConversationPage() {
   }
 
   const canPost = conversationType !== "announcement" || profile.role === "org_super_admin";
+  const typingLabel =
+    typingNames.size === 0
+      ? null
+      : typingNames.size === 1
+      ? `${Array.from(typingNames.values())[0]} is typing...`
+      : `${Array.from(typingNames.values()).join(", ")} are typing...`;
 
   return (
     <div className="flex h-full">
       <div className="flex h-full min-w-0 flex-1 flex-col">
+        {actionError && (
+          <Alert tone="danger" className="m-3 mb-0">
+            {actionError}
+          </Alert>
+        )}
+        {pinnedMessages.length > 0 && (
+          <div className="flex flex-col gap-1 border-b border-[var(--divider)] bg-[var(--surface-soft)] p-2">
+            {pinnedMessages.map(({ pin, message }) => (
+              <button
+                key={pin.id}
+                type="button"
+                onClick={() => scrollToMessage(message.id)}
+                className="flex items-center gap-2 rounded-lg border-0 bg-transparent px-2 py-1 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-med)] cursor-pointer"
+              >
+                <span aria-hidden>📌</span>
+                <span className="truncate font-semibold text-[var(--text-primary)]">{personLabel(message.author)}:</span>
+                <span className="truncate">{message.deleted_for_everyone ? "This message was deleted" : message.body}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
-          {topLevelMessages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isMe={message.author_id === profile.id}
-              attachments={attachments.filter((a) => a.message_id === message.id)}
-              reactions={reactions.filter((r) => r.message_id === message.id)}
-              myProfileId={profile.id}
-              taskPreviews={taskPreviews}
-              onOpenTask={(id) => router.push(`/tasks/${id}`)}
-              onToggleReaction={(emoji) => toggleReaction(message.id, emoji)}
-              onDownloadFile={downloadFile}
-              replyCount={replyCount(message.id)}
-              onOpenThread={() => setActiveThreadId(message.id)}
-            />
-          ))}
+          {topLevelMessages.map((message, index) => {
+            const previous = topLevelMessages[index - 1];
+            const dayLabel = formatDayLabel(message.created_at);
+            const showSeparator = !previous || dayLabel !== formatDayLabel(previous.created_at);
+            const showHeader =
+              showSeparator ||
+              !previous ||
+              previous.author_id !== message.author_id ||
+              new Date(message.created_at).getTime() - new Date(previous.created_at).getTime() > GROUP_GAP_MS;
+            return (
+              <div key={message.id} id={`message-${message.id}`}>
+                {showSeparator && (
+                  <div className="my-3 flex items-center justify-center">
+                    <span className="rounded-full bg-[var(--surface-soft)] px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-[var(--text-tertiary)]">
+                      {dayLabel}
+                    </span>
+                  </div>
+                )}
+                <MessageBubble
+                  message={message}
+                  isMe={message.author_id === profile.id}
+                  showHeader={showHeader}
+                  attachments={attachments.filter((a) => a.message_id === message.id)}
+                  reactions={reactions.filter((r) => r.message_id === message.id)}
+                  myProfileId={profile.id}
+                  taskPreviews={taskPreviews}
+                  onOpenTask={(id) => router.push(`/tasks/${id}`)}
+                  onToggleReaction={(emoji) => toggleReaction(message.id, emoji)}
+                  onDownloadFile={downloadFile}
+                  replyCount={replyCount(message.id)}
+                  onOpenThread={() => setActiveThreadId(message.id)}
+                  isRead={reads.some((r) => r.message_id === message.id && r.profile_id !== profile.id)}
+                  isPinned={pins.some((p) => p.message_id === message.id)}
+                  canEdit={canEditMessage(message)}
+                  canDeleteForEveryone={canDeleteForEveryone(message)}
+                  menuOpen={openMenuId === message.id}
+                  onToggleMenu={() => setOpenMenuId((current) => (current === message.id ? null : message.id))}
+                  editing={editingId === message.id}
+                  editBody={editBody}
+                  onEditBodyChange={setEditBody}
+                  onStartEdit={() => startEdit(message)}
+                  onCancelEdit={cancelEdit}
+                  onSaveEdit={() => saveEdit(message.id)}
+                  onDeleteForMe={() => deleteForMe(message.id)}
+                  onDeleteForEveryone={() => deleteForEveryone(message.id)}
+                  onTogglePin={() => togglePin(message.id)}
+                  onForward={() => openForward(message.id)}
+                  onCopy={() => copyMessageText(message.body)}
+                />
+              </div>
+            );
+          })}
           {topLevelMessages.length === 0 && <p className="text-center text-sm text-[var(--text-tertiary)]">No messages yet. Say hello.</p>}
           <div ref={bottomRef} />
         </div>
 
         <div className="border-t border-[var(--divider)] p-3">
+          {typingLabel && <p className="mb-1.5 px-1 text-xs italic text-[var(--text-tertiary)]">{typingLabel}</p>}
           {!canPost ? (
             <p className="text-center text-xs font-semibold text-[var(--text-tertiary)]">Only the Organization Super Admin can post to Announcements.</p>
           ) : (
@@ -471,6 +853,7 @@ export default function ConversationPage() {
                   value={body}
                   onChange={(e) => onBodyChange(e.target.value)}
                   onKeyDown={handleComposerKeyDown}
+                  onBlur={() => { if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current); sendTyping(false); }}
                   rows={2}
                   placeholder="Message... use @ to mention, # to reference a task, Enter to send"
                   className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
@@ -543,6 +926,23 @@ export default function ConversationPage() {
               onOpenTask={(id) => router.push(`/tasks/${id}`)}
               onToggleReaction={(emoji) => toggleReaction(activeThread.id, emoji)}
               onDownloadFile={downloadFile}
+              isRead={reads.some((r) => r.message_id === activeThread.id && r.profile_id !== profile.id)}
+              isPinned={pins.some((p) => p.message_id === activeThread.id)}
+              canEdit={canEditMessage(activeThread)}
+              canDeleteForEveryone={canDeleteForEveryone(activeThread)}
+              menuOpen={openMenuId === activeThread.id}
+              onToggleMenu={() => setOpenMenuId((current) => (current === activeThread.id ? null : activeThread.id))}
+              editing={editingId === activeThread.id}
+              editBody={editBody}
+              onEditBodyChange={setEditBody}
+              onStartEdit={() => startEdit(activeThread)}
+              onCancelEdit={cancelEdit}
+              onSaveEdit={() => saveEdit(activeThread.id)}
+              onDeleteForMe={() => deleteForMe(activeThread.id)}
+              onDeleteForEveryone={() => deleteForEveryone(activeThread.id)}
+              onTogglePin={() => togglePin(activeThread.id)}
+              onForward={() => openForward(activeThread.id)}
+              onCopy={() => copyMessageText(activeThread.body)}
               compact
             />
             <div className="border-t border-[var(--divider)] pt-3">
@@ -562,6 +962,23 @@ export default function ConversationPage() {
                     onOpenTask={(id) => router.push(`/tasks/${id}`)}
                     onToggleReaction={(emoji) => toggleReaction(reply.id, emoji)}
                     onDownloadFile={downloadFile}
+                    isRead={reads.some((r) => r.message_id === reply.id && r.profile_id !== profile.id)}
+                    isPinned={pins.some((p) => p.message_id === reply.id)}
+                    canEdit={canEditMessage(reply)}
+                    canDeleteForEveryone={canDeleteForEveryone(reply)}
+                    menuOpen={openMenuId === reply.id}
+                    onToggleMenu={() => setOpenMenuId((current) => (current === reply.id ? null : reply.id))}
+                    editing={editingId === reply.id}
+                    editBody={editBody}
+                    onEditBodyChange={setEditBody}
+                    onStartEdit={() => startEdit(reply)}
+                    onCancelEdit={cancelEdit}
+                    onSaveEdit={() => saveEdit(reply.id)}
+                    onDeleteForMe={() => deleteForMe(reply.id)}
+                    onDeleteForEveryone={() => deleteForEveryone(reply.id)}
+                    onTogglePin={() => togglePin(reply.id)}
+                    onForward={() => openForward(reply.id)}
+                    onCopy={() => copyMessageText(reply.body)}
                     compact
                   />
                 ))}
@@ -630,6 +1047,23 @@ export default function ConversationPage() {
         </div>
       )}
 
+      <Modal open={!!forwardMessageId} onClose={() => setForwardMessageId(null)} title="Forward message">
+        <div className="max-h-72 space-y-1 overflow-y-auto">
+          {forwardTargets.length === 0 && <p className="py-4 text-center text-sm text-slate-500">No other conversations to forward to.</p>}
+          {forwardTargets.map((target) => (
+            <button
+              key={target.id}
+              type="button"
+              disabled={forwardBusy}
+              onClick={() => forwardTo(target.id)}
+              className="block w-full rounded-lg border-0 bg-transparent px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50 cursor-pointer"
+            >
+              {target.label}
+            </button>
+          ))}
+        </div>
+      </Modal>
+
       <FilePreviewModal target={preview.target} onClose={preview.close} />
     </div>
   );
@@ -638,6 +1072,7 @@ export default function ConversationPage() {
 function MessageBubble({
   message,
   isMe,
+  showHeader = true,
   attachments,
   reactions,
   myProfileId,
@@ -647,10 +1082,28 @@ function MessageBubble({
   onDownloadFile,
   replyCount,
   onOpenThread,
+  isRead,
+  isPinned,
+  canEdit,
+  canDeleteForEveryone,
+  menuOpen,
+  onToggleMenu,
+  editing,
+  editBody,
+  onEditBodyChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDeleteForMe,
+  onDeleteForEveryone,
+  onTogglePin,
+  onForward,
+  onCopy,
   compact,
 }: {
   message: MessageRow;
   isMe: boolean;
+  showHeader?: boolean;
   attachments: Attachment[];
   reactions: Reaction[];
   myProfileId: string;
@@ -660,25 +1113,78 @@ function MessageBubble({
   onDownloadFile: (attachment: Attachment) => void;
   replyCount?: number;
   onOpenThread?: () => void;
+  isRead: boolean;
+  isPinned: boolean;
+  canEdit: boolean;
+  canDeleteForEveryone: boolean;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  editing: boolean;
+  editBody: string;
+  onEditBodyChange: (value: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDeleteForMe: () => void;
+  onDeleteForEveryone: () => void;
+  onTogglePin: () => void;
+  onForward: () => void;
+  onCopy: () => void;
   compact?: boolean;
 }) {
-  return (
-    <div className={`flex gap-3 ${!compact && isMe ? "flex-row-reverse" : ""}`}>
-      <Avatar name={personLabel(message.author)} size="sm" />
-      <div className={`min-w-0 ${compact ? "flex-1" : "max-w-[72%]"} ${!compact && isMe ? "items-end text-right" : ""}`}>
-        <p className="text-xs font-semibold text-[var(--text-secondary)]">
-          {personLabel(message.author)} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </p>
-        {message.body.trim().length > 0 && (
-          <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${!compact && isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
-            {parseMessageBody(message.body).map((segment, i) =>
-              segment.type === "text" ? (
-                <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
-              ) : (
-                <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => onOpenTask(segment.id)} />
-              )
-            )}
+  if (message.deleted_for_everyone) {
+    return (
+      <div className={`flex gap-3 ${!compact && isMe ? "flex-row-reverse" : ""}`}>
+        {showHeader && <Avatar name={personLabel(message.author)} size="sm" />}
+        {!showHeader && <div className="w-8 shrink-0" />}
+        <div className={`min-w-0 ${compact ? "flex-1" : "max-w-[72%]"} ${!compact && isMe ? "items-end text-right" : ""}`}>
+          <div className="mt-1 inline-block rounded-2xl border border-dashed border-[var(--glass-border-soft)] px-4 py-2.5 text-sm italic text-[var(--text-tertiary)]">
+            This message was deleted
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`group flex gap-3 ${!compact && isMe ? "flex-row-reverse" : ""}`}>
+      {showHeader ? <Avatar name={personLabel(message.author)} size="sm" /> : <div className="w-8 shrink-0" />}
+      <div className={`min-w-0 ${compact ? "flex-1" : "max-w-[72%]"} ${!compact && isMe ? "items-end text-right" : ""}`}>
+        {showHeader && (
+          <p className="text-xs font-semibold text-[var(--text-secondary)]">
+            {personLabel(message.author)} · {new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </p>
+        )}
+        {isPinned && <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-tertiary)]">📌 Pinned</p>}
+        {editing ? (
+          <div className="mt-1 space-y-1.5">
+            <textarea
+              value={editBody}
+              onChange={(e) => onEditBodyChange(e.target.value)}
+              rows={2}
+              className="w-full rounded-xl border border-[#8b5cf6] bg-[var(--glass-bg-strong)] p-2.5 text-sm text-[var(--text-primary)] outline-none"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <Button type="button" onClick={onSaveEdit} className="h-8 px-3 text-xs">Save</Button>
+              <button type="button" onClick={onCancelEdit} className="rounded-lg border-0 bg-transparent px-3 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          message.body.trim().length > 0 && (
+            <div className={`mt-1 inline-block rounded-2xl px-4 py-2.5 text-sm ${!compact && isMe ? "bg-gradient-to-r from-[#8b5cf6] to-[#ec4899] text-white shadow-[0_4px_12px_rgba(139,92,246,0.25)]" : "bg-[var(--surface-soft)] border border-[var(--glass-border-soft)] text-[var(--text-primary)]"}`}>
+              {parseMessageBody(message.body).map((segment, i) =>
+                segment.type === "text" ? (
+                  <span key={i} className="whitespace-pre-wrap">{segment.value}</span>
+                ) : (
+                  <TaskChip key={i} preview={taskPreviews[segment.id]} onOpen={() => onOpenTask(segment.id)} />
+                )
+              )}
+              {message.edited_at && <span className="ml-1.5 text-[10px] opacity-70">(edited)</span>}
+            </div>
+          )
         )}
         {attachments.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1.5">
@@ -719,8 +1225,91 @@ function MessageBubble({
               {replyCount && replyCount > 0 ? `💬 ${replyCount} repl${replyCount === 1 ? "y" : "ies"}` : "💬 Reply"}
             </button>
           )}
+          <MessageMenu
+            open={menuOpen}
+            onToggle={onToggleMenu}
+            isPinned={isPinned}
+            canEdit={canEdit}
+            canDeleteForEveryone={canDeleteForEveryone}
+            onCopy={onCopy}
+            onForward={onForward}
+            onStartEdit={onStartEdit}
+            onDeleteForMe={onDeleteForMe}
+            onDeleteForEveryone={onDeleteForEveryone}
+            onTogglePin={onTogglePin}
+          />
+          {isMe && !compact && (
+            <span className="text-[10px] text-[var(--text-tertiary)]" title={isRead ? "Read" : "Sent"}>
+              {isRead ? "✓✓" : "✓"}
+            </span>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MessageMenu({
+  open,
+  onToggle,
+  isPinned,
+  canEdit,
+  canDeleteForEveryone,
+  onCopy,
+  onForward,
+  onStartEdit,
+  onDeleteForMe,
+  onDeleteForEveryone,
+  onTogglePin,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  isPinned: boolean;
+  canEdit: boolean;
+  canDeleteForEveryone: boolean;
+  onCopy: () => void;
+  onForward: () => void;
+  onStartEdit: () => void;
+  onDeleteForMe: () => void;
+  onDeleteForEveryone: () => void;
+  onTogglePin: () => void;
+}) {
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label="Message actions"
+        className="rounded-full border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2 py-0.5 text-xs text-[var(--text-secondary)] opacity-0 transition group-hover:opacity-100 hover:text-[var(--text-primary)] cursor-pointer"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-10 mb-1 w-44 rounded-xl glass-panel p-1 text-left shadow-lg">
+          <button type="button" onClick={onCopy} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+            Copy text
+          </button>
+          <button type="button" onClick={onForward} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+            Forward
+          </button>
+          <button type="button" onClick={onTogglePin} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+            {isPinned ? "Unpin" : "Pin"}
+          </button>
+          {canEdit && (
+            <button type="button" onClick={onStartEdit} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+              Edit
+            </button>
+          )}
+          <button type="button" onClick={onDeleteForMe} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-soft)] cursor-pointer">
+            Delete for me
+          </button>
+          {canDeleteForEveryone && (
+            <button type="button" onClick={onDeleteForEveryone} className="block w-full rounded-lg border-0 bg-transparent px-3 py-1.5 text-left text-xs text-red-500 hover:bg-[var(--surface-soft)] cursor-pointer">
+              Delete for everyone
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
