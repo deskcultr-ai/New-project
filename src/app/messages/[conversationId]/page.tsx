@@ -52,9 +52,12 @@ export default function ConversationPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [replyBody, setReplyBody] = useState("");
   const [replySending, setReplySending] = useState(false);
+  const [pendingReplyFile, setPendingReplyFile] = useState<File | null>(null);
+  const replyFileInputRef = useRef<HTMLInputElement>(null);
   const threadBottomRef = useRef<HTMLDivElement>(null);
 
   const loadTaskPreviews = useCallback(async (bodies: string[]) => {
@@ -142,7 +145,10 @@ export default function ConversationPage() {
         async (payload) => {
           const { data: author } = await supabase.from("profiles").select("id, full_name, username, email").eq("id", (payload.new as { author_id: string }).author_id).maybeSingle();
           const row = { ...(payload.new as MessageRow), author: author ?? null };
-          setMessages((current) => [...current, row]);
+          // The sender's own load() call after posting (used to also refresh
+          // attachments/read-state) can race this realtime echo of the same
+          // insert -- whichever arrives second must not add a second copy.
+          setMessages((current) => (current.some((m) => m.id === row.id) ? current : [...current, row]));
           loadTaskPreviews([row.body]);
 
           // Without this, a message arriving while this conversation is
@@ -157,7 +163,10 @@ export default function ConversationPage() {
         }
       )
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reactions" }, (payload) => {
-        setReactions((current) => [...current, payload.new as Reaction]);
+        const row = payload.new as Reaction;
+        // Same race as messages: toggleReaction() already appends its own
+        // optimistic copy locally, so skip this one if it's already there.
+        setReactions((current) => (current.some((r) => r.id === row.id) ? current : [...current, row]));
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "message_reactions" }, (payload) => {
         setReactions((current) => current.filter((r) => r.id !== (payload.old as Reaction).id));
@@ -219,6 +228,22 @@ export default function ConversationPage() {
     setSuggestTasks([]);
   }
 
+  async function uploadMessageAttachment(messageId: string, file: File) {
+    if (!profile) return;
+    const path = `${profile.organization_id}/messages/${params.conversationId}/${messageId}/${Date.now()}-${file.name}`;
+    const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, file);
+    if (!uploadErr) {
+      await supabase.from("message_attachments").insert({
+        message_id: messageId,
+        uploaded_by: profile.id,
+        storage_path: path,
+        file_name: file.name,
+        file_size: file.size,
+        content_type: file.type || null,
+      });
+    }
+  }
+
   async function sendMessage(event: React.FormEvent) {
     event.preventDefault();
     if (!profile || !body.trim()) return;
@@ -237,20 +262,7 @@ export default function ConversationPage() {
       return;
     }
 
-    if (pendingFile && profile) {
-      const path = `${profile.organization_id}/messages/${params.conversationId}/${newId}/${Date.now()}-${pendingFile.name}`;
-      const { error: uploadErr } = await uploadFileWithRetry("org-drive", path, pendingFile);
-      if (!uploadErr) {
-        await supabase.from("message_attachments").insert({
-          message_id: newId,
-          uploaded_by: profile.id,
-          storage_path: path,
-          file_name: pendingFile.name,
-          file_size: pendingFile.size,
-          content_type: pendingFile.type || null,
-        });
-      }
-    }
+    if (pendingFile) await uploadMessageAttachment(newId, pendingFile);
 
     setBody("");
     setMentionedIds([]);
@@ -264,19 +276,35 @@ export default function ConversationPage() {
     if (!profile || !activeThreadId || !replyBody.trim()) return;
     setReplySending(true);
 
-    const { error: sendError } = await supabase.rpc("post_message", {
+    const { data: newId, error: sendError } = await supabase.rpc("post_message", {
       p_conversation_id: params.conversationId,
       p_body: replyBody.trim(),
       p_reply_to_message_id: activeThreadId,
     });
 
-    setReplySending(false);
-    if (sendError) {
-      setError(sendError.message);
+    if (sendError || !newId) {
+      setReplySending(false);
+      setError(sendError?.message ?? "Could not send the reply.");
       return;
     }
+
+    if (pendingReplyFile) await uploadMessageAttachment(newId, pendingReplyFile);
+
     setReplyBody("");
+    setPendingReplyFile(null);
+    setReplySending(false);
     load();
+  }
+
+  // Enter sends (matches every chat app); Shift+Enter still inserts a
+  // newline. Submitting the form itself (rather than calling the handler
+  // directly) keeps this in sync with the disabled/validation state on the
+  // Send button.
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
   }
 
   async function toggleReaction(messageId: string, emoji: string) {
@@ -371,13 +399,43 @@ export default function ConversationPage() {
                 <textarea
                   value={body}
                   onChange={(e) => onBodyChange(e.target.value)}
+                  onKeyDown={handleComposerKeyDown}
                   rows={2}
-                  placeholder="Message... use @ to mention, # to reference a task"
+                  placeholder="Message... use @ to mention, # to reference a task, Enter to send"
                   className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-3 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
                 />
               </div>
+              {pendingFile && (
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+                  <span className="truncate">📎 {pendingFile.name} ({(pendingFile.size / 1024).toFixed(0)} KB)</span>
+                  <button
+                    type="button"
+                    onClick={() => { setPendingFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                    className="ml-auto shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                    aria-label="Remove attachment"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3">
-                <input type="file" onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)} className="text-xs text-[var(--text-secondary)]" />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Attach an image, video, or file"
+                  aria-label="Attach a file"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)] hover:text-primary hover:border-primary/40 cursor-pointer transition"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  </svg>
+                </button>
                 <Button type="submit" disabled={sending || !body.trim()}>
                   {sending ? "Sending..." : "Send"}
                 </Button>
@@ -440,13 +498,46 @@ export default function ConversationPage() {
               <textarea
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
+                onKeyDown={handleComposerKeyDown}
                 rows={2}
-                placeholder="Reply in thread..."
+                placeholder="Reply in thread... Enter to send"
                 className="w-full rounded-xl border border-[var(--glass-border-soft)] bg-[var(--glass-bg-strong)] p-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/20 backdrop-blur-xl"
               />
-              <Button type="submit" disabled={replySending || !replyBody.trim()} className="mt-2 h-9 w-full">
-                {replySending ? "Sending..." : "Reply"}
-              </Button>
+              {pendingReplyFile && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
+                  <span className="truncate">📎 {pendingReplyFile.name} ({(pendingReplyFile.size / 1024).toFixed(0)} KB)</span>
+                  <button
+                    type="button"
+                    onClick={() => { setPendingReplyFile(null); if (replyFileInputRef.current) replyFileInputRef.current.value = ""; }}
+                    className="ml-auto shrink-0 border-0 bg-transparent text-[var(--text-tertiary)] hover:text-red-500 cursor-pointer"
+                    aria-label="Remove attachment"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  ref={replyFileInputRef}
+                  type="file"
+                  onChange={(e) => setPendingReplyFile(e.target.files?.[0] ?? null)}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => replyFileInputRef.current?.click()}
+                  title="Attach an image, video, or file"
+                  aria-label="Attach a file"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--glass-border-soft)] bg-[var(--surface-soft)] text-[var(--text-secondary)] hover:text-primary hover:border-primary/40 cursor-pointer transition"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-[18px] w-[18px]">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                  </svg>
+                </button>
+                <Button type="submit" disabled={replySending || !replyBody.trim()} className="h-9 flex-1">
+                  {replySending ? "Sending..." : "Reply"}
+                </Button>
+              </div>
             </form>
           )}
         </div>

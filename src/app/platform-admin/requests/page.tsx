@@ -68,6 +68,22 @@ export default function PlatformAdminRequestsPage() {
     run();
   }, [load]);
 
+  // pending_org_requests has no RLS SELECT policy at all -- it's reachable
+  // only through the service-role-backed API route (see docs/AUTH_WORKFLOW.md
+  // §1), so a client-side Supabase Realtime subscription can't see inserts
+  // on it without either exposing the service-role key in the browser or
+  // duplicating the PLATFORM_OWNER_EMAILS allowlist into a new SQL-visible
+  // policy -- neither is a change to make silently. Polling the existing
+  // authorized endpoint gets the same "don't need to hit refresh" result
+  // without touching that security boundary.
+  useEffect(() => {
+    if (!authorized) return;
+    const interval = setInterval(() => {
+      load();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [authorized, load]);
+
   async function act(requestId: string, action: "approve" | "reject") {
     setBusyId(requestId);
     setError("");
