@@ -142,43 +142,115 @@ Verifying a domain removes this restriction entirely.
 ### 5b. Email templates — Authentication → Emails → Templates
 
 **"Invite user"** — Supabase only gives you one template slot for this
-event, but the invite metadata now carries `invite_role`,
-`invite_role_label`, `organization_name`, and `department_name` (readable
-as `.Data.*`), so a single template can still read differently per role
-using plain Go template conditionals. Replace the default with:
+event, but the invite metadata carries `invite_role`, `invite_role_label`,
+`organization_name`, and `department_name` (readable as `.Data.*`), so the
+one template still reads differently per role via plain Go template
+conditionals. This is the actual template in use — gradient header, feature
+checklist, and CTA are the existing DeskCulture branding; only the
+greeting, description, and feature list are role-aware:
 
 ```html
-<h2>You're invited to {{ .Data.organization_name }}</h2>
-<p>You've been invited to join <strong>{{ .Data.organization_name }}</strong>'s
-workspace on DeskCulture as a <strong>{{ .Data.invite_role_label }}</strong>
-{{ if .Data.department_name }}in the <strong>{{ .Data.department_name }}</strong>
-department{{ end }}.</p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>You're Invited to DeskCulture</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7fb;padding:40px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.08);">
 
-{{ if eq .Data.invite_role "team_leader" }}
-<p>As a Team Leader, you'll run the {{ .Data.department_name }} department:
-invite Managers and Executives into it, create and assign tasks across the
-whole organization, and see how your department's work compares org-wide.</p>
-{{ else if eq .Data.invite_role "manager" }}
-<p>As a Manager, you'll invite and oversee your own Executives in
-{{ .Data.department_name }} — creating, assigning, and tracking their tasks
-day to day.</p>
-{{ else }}
-<p>As an Executive, you'll get your own task board in
-{{ .Data.department_name }} — track what's assigned to you, create tasks
-for yourself, and collaborate with your team in Messages and Drive.</p>
-{{ end }}
+  <!-- Header -->
+  <tr><td style="background:linear-gradient(135deg,#4F46E5,#7C3AED);padding:40px;text-align:center;">
+    <h1 style="margin:0;color:#ffffff;font-size:32px;">DeskCulture</h1>
+    <p style="margin-top:12px;color:#E9E7FF;font-size:16px;">One Workspace. All Your Work.</p>
+  </td></tr>
 
-<p><a href="{{ .ConfirmationURL }}">Accept invite &amp; set password</a></p>
-<p style="color:#888;font-size:12px">If you weren't expecting this, you
-can ignore this email.</p>
+  <!-- Body -->
+  <tr><td style="padding:45px;">
+    <p style="font-size:14px;color:#6b7280;margin:0;">👋 Hello,</p>
+    <h2 style="margin:18px 0 12px;font-size:28px;color:#111827;">
+      You're invited to join {{ .Data.organization_name }}!
+    </h2>
+    <p style="font-size:16px;line-height:28px;color:#4b5563;">
+      You've been invited to join <strong>{{ .Data.organization_name }}</strong>'s
+      workspace on <strong>DeskCulture</strong> as a
+      <strong>{{ .Data.invite_role_label }}</strong>{{ if .Data.department_name }} in the
+      <strong>{{ .Data.department_name }}</strong> department{{ end }}, where your team
+      collaborates on tasks, chats, meetings, documents, and projects—all in one
+      secure workspace.
+    </p>
+
+    <!-- Feature Box: role-specific checklist -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:30px 0;background:#F8FAFC;border:1px solid #E5E7EB;border-radius:14px;">
+      <tr><td style="padding:24px;">
+        <h3 style="margin:0 0 15px;color:#111827;">What you'll get access to</h3>
+        <table width="100%">
+          {{ if eq .Data.invite_role "team_leader" }}
+          <tr><td style="padding:8px 0;color:#374151;">✅ Invite Managers &amp; Executives into {{ .Data.department_name }}</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Create &amp; assign tasks across the whole organization</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ See how {{ .Data.department_name }} compares org-wide</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Team Chat, Shared Drive &amp; Meetings</td></tr>
+          {{ else if eq .Data.invite_role "manager" }}
+          <tr><td style="padding:8px 0;color:#374151;">✅ Invite &amp; manage your own Executives in {{ .Data.department_name }}</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Create, assign &amp; track their tasks day to day</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Shared Files &amp; Organization Drive</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Team Chat &amp; Meetings</td></tr>
+          {{ else }}
+          <tr><td style="padding:8px 0;color:#374151;">✅ Your own task board in {{ .Data.department_name }}</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Create tasks for yourself &amp; track what's assigned to you</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Shared Files &amp; Organization Drive</td></tr>
+          <tr><td style="padding:8px 0;color:#374151;">✅ Team Chat &amp; Meetings</td></tr>
+          {{ end }}
+        </table>
+      </td></tr>
+    </table>
+
+    <!-- CTA -->
+    <table cellpadding="0" cellspacing="0" align="center">
+      <tr><td bgcolor="#4F46E5" style="border-radius:10px;">
+        <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite"
+           style="display:inline-block;padding:16px 38px;color:#ffffff;font-size:16px;text-decoration:none;font-weight:bold;">
+          Accept Invitation →
+        </a>
+      </td></tr>
+    </table>
+
+    <p style="margin-top:30px;color:#6b7280;font-size:14px;text-align:center;">
+      Activate your account and create your password to get started.
+    </p>
+    <hr style="border:none;border-top:1px solid #E5E7EB;margin:35px 0;">
+    <p style="font-size:13px;color:#9CA3AF;line-height:22px;">
+      If the button above doesn't work, copy and paste this link into your browser:
+    </p>
+    <p style="word-break:break-all;font-size:13px;color:#4F46E5;">
+      {{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite
+    </p>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td style="padding:30px;background:#F9FAFB;text-align:center;">
+    <p style="margin:0;color:#6B7280;font-size:14px;">This invitation was sent securely by <strong>DeskCulture</strong>.</p>
+    <p style="margin-top:12px;color:#9CA3AF;font-size:12px;">If you weren't expecting this invitation, you can safely ignore this email. No account will be created until you accept it.</p>
+    <p style="margin-top:25px;font-size:12px;color:#D1D5DB;">© 2026 DeskCulture. All rights reserved.</p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>
 ```
 
-Keep `{{ .ConfirmationURL }}` — that's the link that lands on
-`/auth/callback`. Don't remove it. (A fuller, styled HTML version of this
-same template — plus rendered previews of what each role actually sees —
-is in the artifact linked from the PR/chat that introduced this; paste
-whichever version you prefer into Authentication → Emails → Templates →
-Invite user.)
+Keep the `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite`
+link (appears twice — CTA button and plain-text fallback) — that's what
+lands on `/auth/callback`. It's equivalent to Supabase's shorthand
+`{{ .ConfirmationURL }}`; don't swap one for the other without testing,
+and don't remove either occurrence. Rendered previews of what each role
+actually receives, plus a copy-paste panel, are in the reference artifact
+linked from the chat that introduced role-aware invites.
 
 **"Magic Link"** — used by `/login`'s "Email code" tab. Must keep
 `{{ .Token }}` (the 6-digit code the login page asks the user to type),
