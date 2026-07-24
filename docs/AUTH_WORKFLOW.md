@@ -71,9 +71,19 @@ Team Leader, Manager, and Executive invites (sent from `/admin/people`,
 `POST /api/invites`) work identically — same trigger, same email template,
 same `/auth/callback → /set-password` path — just with
 `invite_role: 'team_leader' | 'manager' | 'executive'` and a `department_id`
-in the metadata instead. Who can invite whom is enforced in the route itself:
-Organization Super Admin → Team Leader (any dept), Team Leader → Manager or
-Executive (own dept), Manager → Executive (own dept).
+in the metadata instead. Who can invite whom is enforced in the route
+itself: **Organization Super Admin → Team Leader, Manager, or Executive
+(any department — the only role that can skip straight to any tier)**,
+Team Leader → Manager or Executive (own dept), Manager → Executive (own
+dept).
+
+The invite metadata (`user_metadata`, readable in the email template as
+`.Data.*`) also carries `invite_role_label` (a human-readable "Team
+Leader"/"Manager"/"Executive" string), `organization_name`, and
+`department_name` — added specifically so the single "Invite user" email
+template (Section 5b) can greet people by org/department/role without
+needing separate templates per role, since Supabase Auth only has one
+template slot per auth event type.
 
 ## 4. Login (existing accounts)
 
@@ -131,19 +141,44 @@ Verifying a domain removes this restriction entirely.
 
 ### 5b. Email templates — Authentication → Emails → Templates
 
-**"Invite user"** — replace the default with something like:
+**"Invite user"** — Supabase only gives you one template slot for this
+event, but the invite metadata now carries `invite_role`,
+`invite_role_label`, `organization_name`, and `department_name` (readable
+as `.Data.*`), so a single template can still read differently per role
+using plain Go template conditionals. Replace the default with:
 
 ```html
-<h2>You're invited to DeskCulture</h2>
-<p>You've been invited to join your team's workspace. Click below to
-activate your account and set a password.</p>
-<p><a href="{{ .ConfirmationURL }}">Accept invite</a></p>
+<h2>You're invited to {{ .Data.organization_name }}</h2>
+<p>You've been invited to join <strong>{{ .Data.organization_name }}</strong>'s
+workspace on DeskCulture as a <strong>{{ .Data.invite_role_label }}</strong>
+{{ if .Data.department_name }}in the <strong>{{ .Data.department_name }}</strong>
+department{{ end }}.</p>
+
+{{ if eq .Data.invite_role "team_leader" }}
+<p>As a Team Leader, you'll run the {{ .Data.department_name }} department:
+invite Managers and Executives into it, create and assign tasks across the
+whole organization, and see how your department's work compares org-wide.</p>
+{{ else if eq .Data.invite_role "manager" }}
+<p>As a Manager, you'll invite and oversee your own Executives in
+{{ .Data.department_name }} — creating, assigning, and tracking their tasks
+day to day.</p>
+{{ else }}
+<p>As an Executive, you'll get your own task board in
+{{ .Data.department_name }} — track what's assigned to you, create tasks
+for yourself, and collaborate with your team in Messages and Drive.</p>
+{{ end }}
+
+<p><a href="{{ .ConfirmationURL }}">Accept invite &amp; set password</a></p>
 <p style="color:#888;font-size:12px">If you weren't expecting this, you
 can ignore this email.</p>
 ```
 
 Keep `{{ .ConfirmationURL }}` — that's the link that lands on
-`/auth/callback`. Don't remove it.
+`/auth/callback`. Don't remove it. (A fuller, styled HTML version of this
+same template — plus rendered previews of what each role actually sees —
+is in the artifact linked from the PR/chat that introduced this; paste
+whichever version you prefer into Authentication → Emails → Templates →
+Invite user.)
 
 **"Magic Link"** — used by `/login`'s "Email code" tab. Must keep
 `{{ .Token }}` (the 6-digit code the login page asks the user to type),

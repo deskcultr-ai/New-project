@@ -101,12 +101,18 @@ This is the org's structural control panel. Three sections:
 
 - **Departments** — a text field + "Add department" button. Departments
   are flat (org-wide), created only by the Organization Super Admin.
-- **Invite Team Leaders** — email field + department dropdown + "Send
-  invite" button. This is how you populate departments: invite someone as
-  the **Team Leader** of a specific department. Behind the scenes: `POST
-  /api/invites` → `admin.inviteUserByEmail()` with `invite_role:
-  "team_leader"` and the chosen `department_id` → their account + active
-  profile exist immediately, invite email sent.
+- **Invite people** — email field + a **role dropdown** (Team Leader /
+  Manager / Executive) + department dropdown + "Send invite" button. Unlike
+  every other role, the Organization Super Admin can invite directly into
+  any of the three subordinate roles, into any department, skipping the
+  normal chain (Team Leader → Manager → Executive) entirely. Picking
+  Executive also reveals the optional "Assign to Manager" picker described
+  in §5. Behind the scenes: `POST /api/invites` → `admin.inviteUserByEmail()`
+  with the chosen `invite_role` and `department_id` → their account + active
+  profile exist immediately, invite email sent. The invite email also
+  carries the organization name, department name, and a human-readable role
+  label (see the email template notes below) so the message reads
+  naturally regardless of which role was picked.
 - **Org directory** — every person in the org, with an **Active/Pending**
   badge (Pending = they haven't opened their invite email yet;
   the account and permissions are already live either way) and a role
@@ -451,9 +457,9 @@ manual folder creation:
 |---|:---:|:---:|:---:|:---:|:---:|
 | Approve/reject org requests | ✅ | — | — | — | — |
 | Create departments | — | ✅ | — | — | — |
-| Invite a Team Leader | — | ✅ | — | — | — |
-| Invite a Manager | — | ✅ (via Team Leader) | ✅ (own dept) | — | — |
-| Invite an Executive | — | ✅ | ✅ (own dept) | ✅ (own dept) | — |
+| Invite a Team Leader | — | ✅ (any dept) | — | — | — |
+| Invite a Manager | — | ✅ (any dept) | ✅ (own dept) | — | — |
+| Invite an Executive | — | ✅ (any dept) | ✅ (own dept) | ✅ (own dept) | — |
 | View directory | — | ✅ org-wide | ✅ org-wide | ✅ assigned Executives only | ✅ own dept |
 | Reassign an Executive's Manager | — | ✅ (anyone) | ✅ (own dept) | — | — |
 | Create a task | — | ✅ (any dept) | ✅ (any dept) | ✅ (own dept) | ✅ (for themselves only) |

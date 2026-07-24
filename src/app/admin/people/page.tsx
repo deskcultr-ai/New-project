@@ -51,7 +51,7 @@ export default function AdminPeoplePage() {
 
   const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteDeptId, setInviteDeptId] = useState("");
-  const [inviteRole, setInviteRole] = useState<"manager" | "executive">("executive");
+  const [inviteRole, setInviteRole] = useState<"team_leader" | "manager" | "executive">("executive");
   const [inviteManagerId, setInviteManagerId] = useState("");
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
@@ -76,6 +76,7 @@ export default function AdminPeoplePage() {
     const { data: depts } = await supabase.from("departments").select("id, name").eq("organization_id", me.organization_id).order("name");
     setDepartments(depts ?? []);
     if ((me.role === "team_leader" || me.role === "manager") && me.department_id) setInviteDeptId(me.department_id);
+    if (me.role === "org_super_admin") setInviteRole("team_leader");
 
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
@@ -160,8 +161,8 @@ export default function AdminPeoplePage() {
     setInviteError("");
     setInviteNotice("");
 
-    const role = profile.role === "org_super_admin" ? "team_leader" : profile.role === "team_leader" ? inviteRole : "executive";
-    const managerId = role === "executive" && profile.role === "team_leader" && inviteManagerId ? inviteManagerId : undefined;
+    const role = profile.role === "manager" ? "executive" : inviteRole;
+    const managerId = role === "executive" && ["team_leader", "org_super_admin"].includes(profile.role) && inviteManagerId ? inviteManagerId : undefined;
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) {
@@ -302,28 +303,33 @@ export default function AdminPeoplePage() {
             <>
               <Card>
                 <h2 className="text-base font-bold text-[var(--text-primary)]">
-                  Invite {profile.role === "org_super_admin" ? "Team Leaders" : profile.role === "team_leader" ? "Managers or Executives" : "Executives"}
+                  Invite {profile.role === "org_super_admin" ? "People" : profile.role === "team_leader" ? "Managers or Executives" : "Executives"}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--text-secondary)]">
                   {profile.role === "org_super_admin"
-                    ? "Add email addresses and send invites to multiple Team Leaders at once."
+                    ? "Pick a role and department, then add email addresses to invite."
                     : `Add email addresses and send invites to join ${deptName(profile.department_id)}.`}
                 </p>
                 <form onSubmit={sendInvite} className="mt-4 space-y-3">
                   <EmailChipsInput
                     emails={inviteEmails}
                     onChange={setInviteEmails}
-                    placeholder={
-                      profile.role === "org_super_admin"
-                        ? "Add Team Leader email addresses..."
-                        : profile.role === "team_leader"
-                        ? `Add ${inviteRole === "manager" ? "manager" : "executive"} email addresses...`
-                        : "Add executive email addresses..."
-                    }
+                    placeholder={`Add ${inviteRole === "team_leader" ? "team leader" : inviteRole === "manager" ? "manager" : "executive"} email addresses...`}
                     disabled={inviteBusy}
                   />
                   <p className="text-xs text-[var(--text-tertiary)]">Type an email and press Enter, Tab, Space, or comma to add it. Paste multiple emails at once.</p>
                   <div className="flex flex-wrap gap-3 items-center">
+                    {(profile.role === "org_super_admin" || profile.role === "team_leader") && (
+                      <Select
+                        value={inviteRole}
+                        onChange={(e) => setInviteRole(e.target.value as "team_leader" | "manager" | "executive")}
+                        className="w-44"
+                      >
+                        {profile.role === "org_super_admin" && <option value="team_leader">As Team Leader</option>}
+                        <option value="manager">As Manager</option>
+                        <option value="executive">As Executive</option>
+                      </Select>
+                    )}
                     {profile.role === "org_super_admin" && (
                       <Select value={inviteDeptId} onChange={(e) => setInviteDeptId(e.target.value)} className="w-56">
                         <option value="">Select department</option>
@@ -332,16 +338,10 @@ export default function AdminPeoplePage() {
                         ))}
                       </Select>
                     )}
-                    {profile.role === "team_leader" && (
-                      <Select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "manager" | "executive")} className="w-44">
-                        <option value="executive">As Executive</option>
-                        <option value="manager">As Manager</option>
-                      </Select>
-                    )}
-                    {profile.role === "team_leader" && inviteRole === "executive" && (
+                    {["team_leader", "org_super_admin"].includes(profile.role) && inviteRole === "executive" && (
                       <Select value={inviteManagerId} onChange={(e) => setInviteManagerId(e.target.value)} className="w-52">
                         <option value="">No manager (assign later)</option>
-                        {people.filter((p) => p.role === "manager" && p.department_id === profile.department_id).map((m) => (
+                        {people.filter((p) => p.role === "manager" && p.department_id === inviteDeptId).map((m) => (
                           <option key={m.profile_id} value={m.profile_id}>Reports to {m.full_name || personSubtitle(m)}</option>
                         ))}
                       </Select>

@@ -62,26 +62,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not resolve your profile." }, { status: 403 });
   }
 
-  // Org Super Admin invites Team Leaders to any department in the org.
+  // Org Super Admin invites any of the three roles, to any department.
   // Team Leader invites Managers or Executives, scoped to their own department.
   // Manager invites Executives, scoped to their own department.
   if (role === "team_leader" && callerProfile.role !== "org_super_admin") {
     return NextResponse.json({ error: "Only an Organization Super Admin can invite a Team Leader." }, { status: 403 });
   }
-  if (role === "manager" && callerProfile.role !== "team_leader") {
-    return NextResponse.json({ error: "Only a Team Leader can invite a Manager." }, { status: 403 });
+  if (role === "manager" && !["org_super_admin", "team_leader"].includes(callerProfile.role)) {
+    return NextResponse.json({ error: "Only a Team Leader or Organization Super Admin can invite a Manager." }, { status: 403 });
   }
-  if (role === "executive" && !["team_leader", "manager"].includes(callerProfile.role)) {
-    return NextResponse.json({ error: "Only a Team Leader or Manager can invite an Executive." }, { status: 403 });
+  if (role === "executive" && !["org_super_admin", "team_leader", "manager"].includes(callerProfile.role)) {
+    return NextResponse.json({ error: "Only a Team Leader, Manager, or Organization Super Admin can invite an Executive." }, { status: 403 });
   }
-  if ((role === "manager" || role === "executive") && departmentId !== callerProfile.department_id) {
+  if ((role === "manager" || role === "executive") && callerProfile.role !== "org_super_admin" && departmentId !== callerProfile.department_id) {
     return NextResponse.json({ error: "You can only invite into your own department." }, { status: 403 });
   }
 
   // Confirm the target department actually belongs to the caller's org
   const { data: department, error: deptError } = await bearer.userClient
     .from("departments")
-    .select("id, organization_id")
+    .select("id, organization_id, name")
     .eq("id", departmentId)
     .maybeSingle();
 
@@ -89,15 +89,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Department not found in your organization." }, { status: 400 });
   }
 
+  const { data: organization } = await bearer.userClient
+    .from("organizations")
+    .select("name")
+    .eq("id", callerProfile.organization_id)
+    .maybeSingle();
+
   // Manager -> Executive assignment: a Manager invites into their own team
-  // automatically; a Team Leader may optionally pick a Manager to assign
-  // the new Executive to (left unassigned otherwise, resolvable later from
-  // /admin/people).
+  // automatically; a Team Leader or Org Super Admin may optionally pick a
+  // Manager to assign the new Executive to (left unassigned otherwise,
+  // resolvable later from /admin/people).
   let managerId: string | null = null;
   if (role === "executive") {
     if (callerProfile.role === "manager") {
       managerId = callerProfile.id;
-    } else if (callerProfile.role === "team_leader" && requestedManagerId) {
+    } else if (["team_leader", "org_super_admin"].includes(callerProfile.role) && requestedManagerId) {
       const { data: manager, error: managerError } = await bearer.userClient
         .from("profiles")
         .select("id, role, department_id")
@@ -110,6 +116,8 @@ export async function POST(request: Request) {
     }
   }
 
+  const ROLE_LABEL: Record<string, string> = { team_leader: "Team Leader", manager: "Manager", executive: "Executive" };
+
   const admin = await getSupabaseAdmin();
 
   // Send invites to all emails and collect results
@@ -118,8 +126,11 @@ export async function POST(request: Request) {
       const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
         data: {
           invite_role: role,
+          invite_role_label: ROLE_LABEL[role],
           organization_id: callerProfile.organization_id,
+          organization_name: organization?.name ?? "",
           department_id: department.id,
+          department_name: department.name,
           ...(managerId ? { manager_id: managerId } : {}),
         },
         redirectTo: `${appOrigin(request)}/auth/callback?next=/set-password`,
